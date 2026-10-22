@@ -76,6 +76,33 @@ export type MetricPreview = {
   warnings: MetricValidationIssue[];
 };
 
+export type MetricBuilderParts = {
+  fieldAId: string;
+  fieldBId: string;
+  aggregationA: AggregationOperation;
+  aggregationB: AggregationOperation;
+  operator: BinaryOperation;
+  divisor: number;
+};
+
+export function decomposeMetricBuilderExpression(expression: MetricExpression): MetricBuilderParts | null {
+  const root = expression as Partial<BinaryNode>;
+  if (root.kind !== "operação" || root.operation !== "dividir" || !root.left || !root.right) return null;
+  if (root.right.kind !== "constante" || !Number.isFinite(root.right.value)) return null;
+  if (root.left.kind !== "operação" || !root.left.left || !root.left.right) return null;
+  if (root.left.left.kind !== "agregação" || root.left.right.kind !== "agregação") return null;
+  if (!root.left.left.input?.fieldId || !root.left.right.input?.fieldId) return null;
+
+  return {
+    fieldAId: root.left.left.input.fieldId,
+    fieldBId: root.left.right.input.fieldId,
+    aggregationA: root.left.left.operation,
+    aggregationB: root.left.right.operation,
+    operator: root.left.operation,
+    divisor: root.right.value,
+  };
+}
+
 const numericAggregations = new Set<AggregationOperation>([
   "soma",
   "média",

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  decomposeMetricBuilderExpression,
   previewMetricDefinition,
   validateMetricDefinition,
 } from "../app/lib/metrics.ts";
@@ -81,4 +82,18 @@ test("limita a expressão a dez nós", () => {
 
   assert.equal(validation.valid, false);
   assert.ok(validation.errors.some((error) => error.code === "expressão_complexa"));
+});
+
+test("decompõe uma AST existente para reabrir o construtor visual", () => {
+  const parts = decomposeMetricBuilderExpression(definition().expression);
+
+  assert.deepEqual(parts, {
+    fieldAId: "ticket-count",
+    fieldBId: "event-count",
+    aggregationA: "contagem",
+    aggregationB: "contagem",
+    operator: "multiplicar",
+    divisor: 30,
+  });
+  assert.equal(decomposeMetricBuilderExpression({ kind: "constante", value: 10 }), null);
 });

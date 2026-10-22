@@ -96,3 +96,23 @@ test("remoção altera somente o rascunho atual até que seja salvo", () => {
   assert.equal(dashboardDraftsEqual(current, saved), false);
   assert.equal(dashboardDraftsEqual(cloneDashboardDraft(saved), saved), true);
 });
+
+test("edição substitui a definição sem alterar identidade ou posição", () => {
+  const saved = createDefaultDashboardDraft("overview", defaultLayout);
+  saved.layout.push({ i: customWidget.id, x: 8, y: 2, w: 4, h: 4 });
+  saved.customWidgets.push(customWidget);
+  const current = cloneDashboardDraft(saved);
+  const originalLayout = structuredClone(current.layout);
+
+  current.customWidgets = current.customWidgets.map((widget) => widget.id === customWidget.id ? {
+    ...widget,
+    title: "Índice revisado",
+    definition: { ...widget.definition, name: "Índice revisado" },
+  } : widget);
+
+  assert.equal(current.customWidgets[0].id, customWidget.id);
+  assert.equal(current.customWidgets[0].title, "Índice revisado");
+  assert.equal(saved.customWidgets[0].title, "Índice de carga");
+  assert.deepEqual(current.layout, originalLayout);
+  assert.equal(dashboardDraftsEqual(current, saved), false);
+});

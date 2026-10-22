@@ -88,6 +88,7 @@ import {
   type DashboardKey,
 } from "./mock-data";
 import {
+  decomposeMetricBuilderExpression,
   formatMetricExpression,
   validateMetricDefinition,
   type AggregationOperation,
@@ -832,6 +833,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
   const [editing, setEditing] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [builderWidgetId, setBuilderWidgetId] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [crossFilter, setCrossFilter] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -840,6 +842,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
   const { width, containerRef, mounted } = useContainerWidth();
   const layout = draftEditor.current.layout as Layout;
   const customWidgets = draftEditor.current.customWidgets;
+  const builderWidget = builderWidgetId ? customWidgets.find((widget) => widget.id === builderWidgetId) ?? null : null;
   const hasUnsavedChanges = !dashboardDraftsEqual(draftEditor.current, draftEditor.saved);
 
   function setLayout(updater: Layout | ((current: Layout) => Layout)) {
@@ -914,8 +917,35 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
       };
     });
     setBuilderOpen(false);
+    setBuilderWidgetId(null);
     setEditing(true);
     flash("Indicador adicionado ao rascunho");
+  }
+
+  function updateWidget(definition: MetricDefinitionDraft, preview: MetricPreview) {
+    if (!builderWidgetId) return;
+    setDraftEditor((state) => ({
+      ...state,
+      current: {
+        ...state.current,
+        customWidgets: state.current.customWidgets.map((widget) => widget.id === builderWidgetId ? {
+          ...widget,
+          title: definition.name,
+          visualization: definition.visualization,
+          formula: preview.formula,
+          definition,
+          preview,
+        } : widget),
+      },
+    }));
+    setBuilderOpen(false);
+    setBuilderWidgetId(null);
+    flash("Métrica atualizada no rascunho; salve para confirmar");
+  }
+
+  function closeBuilder() {
+    setBuilderOpen(false);
+    setBuilderWidgetId(null);
   }
 
   function removeCustomWidget(widgetId: string) {
@@ -951,7 +981,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
           ) : (
             <button className="button button--ghost" onClick={() => setEditing(true)}><PencilSimpleIcon size={17} /> Editar layout</button>
           )}
-          <button className="button button--primary" onClick={() => setBuilderOpen(true)}><PlusIcon size={17} /> Indicador</button>
+          <button className="button button--primary" onClick={() => { setBuilderWidgetId(null); setBuilderOpen(true); }}><PlusIcon size={17} /> Indicador</button>
         </div>
       </div>
 
@@ -998,15 +1028,25 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
                   subtitle={`${widget.visualization} · métrica calculada`}
                   editing={editing}
                   action={editing ? (
-                    <button
-                      className="widget-action--danger"
-                      aria-label={`Remover métrica ${widget.title}`}
-                      title="Remover do rascunho"
-                      onMouseDown={(event) => event.stopPropagation()}
-                      onClick={(event) => { event.stopPropagation(); removeCustomWidget(widget.id); }}
-                    >
-                      <TrashIcon size={15} />
-                    </button>
+                    <>
+                      <button
+                        aria-label={`Editar métrica ${widget.title}`}
+                        title="Editar métrica"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => { event.stopPropagation(); setBuilderWidgetId(widget.id); setBuilderOpen(true); }}
+                      >
+                        <PencilSimpleIcon size={15} />
+                      </button>
+                      <button
+                        className="widget-action--danger"
+                        aria-label={`Remover métrica ${widget.title}`}
+                        title="Remover do rascunho"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => { event.stopPropagation(); removeCustomWidget(widget.id); }}
+                      >
+                        <TrashIcon size={15} />
+                      </button>
+                    </>
                   ) : undefined}
                 >
                   <div className="custom-widget-state">
@@ -1022,7 +1062,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
         )}
       </div>
 
-      {builderOpen && <IndicatorBuilder dashboardKey={dashboardKey} onClose={() => setBuilderOpen(false)} onAdd={addWidget} />}
+      {builderOpen && <IndicatorBuilder dashboardKey={dashboardKey} initialDefinition={builderWidget?.definition} onClose={closeBuilder} onSubmit={builderWidget ? updateWidget : addWidget} />}
       {detailsOpen && <DetailsDrawer crossFilter={crossFilter} onClose={() => setDetailsOpen(false)} />}
       {toast && <div className="toast"><CheckCircleIcon size={19} weight="fill" />{toast}</div>}
     </div>
@@ -1065,23 +1105,34 @@ type PreviewState = {
   status: "idle" | "validating" | "valid" | "invalid";
   preview: MetricPreview | null;
   errors: string[];
+  definitionKey: string | null;
 };
 
-function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: DashboardKey; onClose: () => void; onAdd: (definition: MetricDefinitionDraft, preview: MetricPreview) => void }) {
-  const [metricName, setMetricName] = useState("Índice de carga operacional");
-  const [metricDescription, setMetricDescription] = useState("Relação calculada entre os dados selecionados.");
-  const [fieldAId, setFieldAId] = useState("ticket-count");
-  const [fieldBId, setFieldBId] = useState("event-count");
-  const [aggregationA, setAggregationA] = useState<AggregationOperation>("contagem");
-  const [aggregationB, setAggregationB] = useState<AggregationOperation>("contagem");
+type IndicatorBuilderProps = {
+  dashboardKey: DashboardKey;
+  initialDefinition?: MetricDefinitionDraft;
+  onClose: () => void;
+  onSubmit: (definition: MetricDefinitionDraft, preview: MetricPreview) => void;
+};
+
+function IndicatorBuilder({ dashboardKey, initialDefinition, onClose, onSubmit }: IndicatorBuilderProps) {
+  const initialParts = initialDefinition ? decomposeMetricBuilderExpression(initialDefinition.expression) : null;
+  const isEditingMetric = Boolean(initialDefinition);
+  const unsupportedInitialDefinition = isEditingMetric && !initialParts;
+  const [metricName, setMetricName] = useState(initialDefinition?.name ?? "Índice de carga operacional");
+  const [metricDescription, setMetricDescription] = useState(initialDefinition?.description ?? "Relação calculada entre os dados selecionados.");
+  const [fieldAId, setFieldAId] = useState(initialParts?.fieldAId ?? "ticket-count");
+  const [fieldBId, setFieldBId] = useState(initialParts?.fieldBId ?? "event-count");
+  const [aggregationA, setAggregationA] = useState<AggregationOperation>(initialParts?.aggregationA ?? "contagem");
+  const [aggregationB, setAggregationB] = useState<AggregationOperation>(initialParts?.aggregationB ?? "contagem");
   const [activeSlot, setActiveSlot] = useState<"a" | "b">("a");
-  const [operator, setOperator] = useState<BinaryOperation>("multiplicar");
-  const [divisor, setDivisor] = useState("30");
-  const [dimensionId, setDimensionId] = useState("");
-  const [visualization, setVisualization] = useState<MetricVisualization>("Cartão numérico");
-  const [coverage, setCoverage] = useState(80);
+  const [operator, setOperator] = useState<BinaryOperation>(initialParts?.operator ?? "multiplicar");
+  const [divisor, setDivisor] = useState(String(initialParts?.divisor ?? 30));
+  const [dimensionId, setDimensionId] = useState(initialDefinition?.dimensionFieldId ?? "");
+  const [visualization, setVisualization] = useState<MetricVisualization>(initialDefinition?.visualization ?? "Cartão numérico");
+  const [coverage, setCoverage] = useState(initialDefinition?.coverageThreshold ?? 80);
   const [search, setSearch] = useState("");
-  const [previewState, setPreviewState] = useState<PreviewState>({ status: "idle", preview: null, errors: [] });
+  const [previewState, setPreviewState] = useState<PreviewState>({ status: "idle", preview: null, errors: [], definitionKey: null });
 
   const filteredFields = dataFields.filter((item) => item.label.toLowerCase().includes(search.toLowerCase()) || item.source.toLowerCase().includes(search.toLowerCase()));
   const fieldA = dataFields.find((item) => item.id === fieldAId) ?? dataFields[0];
@@ -1111,13 +1162,15 @@ function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: Dash
 
   const clientValidation = useMemo(() => validateMetricDefinition(definition, dataFields), [definition]);
   const formula = useMemo(() => formatMetricExpression(definition.expression, dataFields), [definition.expression]);
+  const definitionKey = useMemo(() => JSON.stringify(definition), [definition]);
+  const canValidate = clientValidation.valid && !unsupportedInitialDefinition;
 
   useEffect(() => {
-    if (!clientValidation.valid) return;
+    if (!canValidate) return;
 
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
-      setPreviewState({ status: "validating", preview: null, errors: [] });
+      setPreviewState({ status: "validating", preview: null, errors: [], definitionKey });
       try {
         const response = await fetch("/api/metrics/preview", {
           method: "POST",
@@ -1127,13 +1180,13 @@ function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: Dash
         });
         const result = await response.json() as { ok: boolean; preview?: MetricPreview; errors?: Array<{ message: string }> };
         if (response.ok && result.ok && result.preview) {
-          setPreviewState({ status: "valid", preview: result.preview, errors: [] });
+          setPreviewState({ status: "valid", preview: result.preview, errors: [], definitionKey });
         } else {
-          setPreviewState({ status: "invalid", preview: null, errors: result.errors?.map((error) => error.message) ?? ["O servidor recusou a definição."] });
+          setPreviewState({ status: "invalid", preview: null, errors: result.errors?.map((error) => error.message) ?? ["O servidor recusou a definição."], definitionKey });
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setPreviewState({ status: "invalid", preview: null, errors: ["Não foi possível validar a métrica no servidor."] });
+        setPreviewState({ status: "invalid", preview: null, errors: ["Não foi possível validar a métrica no servidor."], definitionKey });
       }
     }, 350);
 
@@ -1141,7 +1194,7 @@ function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: Dash
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [clientValidation.valid, definition]);
+  }, [canValidate, definition, definitionKey]);
 
   function selectField(field: DataField) {
     if (activeSlot === "a") {
@@ -1154,15 +1207,20 @@ function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: Dash
     }
   }
 
-  const activePreview = clientValidation.valid ? previewState.preview : null;
-  const effectivePreviewStatus = clientValidation.valid ? previewState.status : "idle";
-  const displayedErrors = [...clientValidation.errors.map((error) => error.message), ...(clientValidation.valid ? previewState.errors : [])];
-  const readyToAdd = clientValidation.valid && effectivePreviewStatus === "valid" && activePreview;
+  const previewMatchesDefinition = previewState.definitionKey === definitionKey;
+  const activePreview = canValidate && previewMatchesDefinition ? previewState.preview : null;
+  const effectivePreviewStatus = canValidate && previewMatchesDefinition ? previewState.status : "idle";
+  const displayedErrors = [
+    ...(unsupportedInitialDefinition ? ["Esta fórmula não pode ser editada por este construtor visual."] : []),
+    ...clientValidation.errors.map((error) => error.message),
+    ...(canValidate && previewMatchesDefinition ? previewState.errors : []),
+  ];
+  const readyToSubmit = canValidate && effectivePreviewStatus === "valid" && activePreview;
 
   return (
     <div className="modal-layer" onMouseDown={onClose}>
       <section className="builder-modal" onMouseDown={(event) => event.stopPropagation()}>
-        <header><div><p className="eyebrow">Laboratório de métricas · {dashboardThemes.find((item) => item.key === dashboardKey)?.title}</p><h2>Nova métrica calculada</h2><span>Relacione campos disponíveis sem escrever código ou acessar dados sensíveis.</span></div><button onClick={onClose} aria-label="Fechar construtor"><XIcon size={19} /></button></header>
+        <header><div><p className="eyebrow">Laboratório de métricas · {dashboardThemes.find((item) => item.key === dashboardKey)?.title}</p><h2>{isEditingMetric ? "Editar métrica calculada" : "Nova métrica calculada"}</h2><span>{isEditingMetric ? "Revise a definição existente; as mudanças permanecem no rascunho até salvar o painel." : "Relacione campos disponíveis sem escrever código ou acessar dados sensíveis."}</span></div><button onClick={onClose} aria-label="Fechar construtor"><XIcon size={19} /></button></header>
         <div className="builder-modal__body builder-modal__body--formula">
           <div className="builder-column builder-column--library">
             <label>1. Dados disponíveis</label>
@@ -1190,7 +1248,7 @@ function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: Dash
             </div>
             <div className="formula-readable"><span>Expressão resultante</span><code>{formula}</code></div>
             {clientValidation.warnings.map((warning) => <div className="builder-warning" key={warning.code}><WarningCircleIcon size={17} weight="fill" /><span><strong>Cobertura combinada limitada</strong><small>{warning.message}</small></span></div>)}
-            {displayedErrors.length > 0 && <div className="builder-errors" role="alert"><strong>Corrija antes de adicionar</strong>{displayedErrors.map((error) => <span key={error}><WarningCircleIcon size={13} />{error}</span>)}</div>}
+            {displayedErrors.length > 0 && <div className="builder-errors" role="alert"><strong>Corrija antes de continuar</strong>{displayedErrors.map((error) => <span key={error}><WarningCircleIcon size={13} />{error}</span>)}</div>}
           </div>
 
           <div className="builder-column builder-column--preview">
@@ -1209,7 +1267,7 @@ function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: Dash
             <div className="quality-note"><InfoIcon size={17} /><span><strong>Validação em duas etapas</strong><small>O navegador dá retorno imediato; o servidor repete as regras e é o único que calcula a prévia.</small></span></div>
           </div>
         </div>
-        <footer><span className="builder-footer-status">{effectivePreviewStatus === "validating" ? "Validando AST no servidor..." : readyToAdd ? "Fórmula válida e prévia confirmada" : `${displayedErrors.length} validação(ões) pendente(s)`}</span><button className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={!readyToAdd} onClick={() => { if (activePreview) onAdd(definition, activePreview); }}><PlusIcon size={16} />Adicionar ao rascunho</button></footer>
+        <footer><span className="builder-footer-status">{effectivePreviewStatus === "validating" ? "Validando AST no servidor..." : readyToSubmit ? "Fórmula válida e prévia confirmada" : displayedErrors.length > 0 ? `${displayedErrors.length} validação(ões) pendente(s)` : "Aguardando validação do servidor..."}</span><button className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={!readyToSubmit} onClick={() => { if (activePreview) onSubmit(definition, activePreview); }}>{isEditingMetric ? <FloppyDiskIcon size={16} /> : <PlusIcon size={16} />}{isEditingMetric ? "Atualizar no rascunho" : "Adicionar ao rascunho"}</button></footer>
       </section>
     </div>
   );
