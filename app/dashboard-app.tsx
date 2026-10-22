@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import ReactGridLayout, {
   type Layout,
   noCompactor,
@@ -56,6 +56,7 @@ import {
   SlidersHorizontalIcon,
   SquaresFourIcon,
   TrendUpIcon,
+  TrashIcon,
   UserCircleIcon,
   UsersThreeIcon,
   WarningCircleIcon,
@@ -86,6 +87,26 @@ import {
   type DataField,
   type DashboardKey,
 } from "./mock-data";
+import {
+  formatMetricExpression,
+  validateMetricDefinition,
+  type AggregationOperation,
+  type BinaryOperation,
+  type MetricDefinitionDraft,
+  type MetricPreview,
+  type MetricVisualization,
+} from "./lib/metrics";
+import {
+  cloneDashboardDraft,
+  createDefaultDashboardDraft,
+  dashboardDraftStorageKey,
+  dashboardDraftsEqual,
+  parseDashboardDraft,
+  serializeDashboardDraft,
+  type DashboardDraftSnapshot,
+  type DraftCustomWidget,
+  type DraftLayoutItem,
+} from "./lib/dashboard-drafts";
 
 type View = "login" | "catalog" | "dashboard" | "admin";
 type AdminSection = "sync" | "users" | "mapping" | "health" | "audit";
@@ -95,13 +116,6 @@ type Filters = {
   sector: string;
   priority: string;
   status: string;
-};
-
-type CustomWidget = {
-  id: string;
-  title: string;
-  visualization: string;
-  formula: string;
 };
 
 type MetricDefinition = {
@@ -783,6 +797,35 @@ function renderDashboardWidgets(
   ];
 }
 
+type DashboardDraftEditor = {
+  current: DashboardDraftSnapshot;
+  saved: DashboardDraftSnapshot;
+};
+
+function toDraftLayout(layout: Layout): DraftLayoutItem[] {
+  return layout.map((item) => {
+    const draftItem: DraftLayoutItem = { i: item.i, x: item.x, y: item.y, w: item.w, h: item.h };
+    if (item.minW !== undefined) draftItem.minW = item.minW;
+    if (item.minH !== undefined) draftItem.minH = item.minH;
+    if (item.maxW !== undefined) draftItem.maxW = item.maxW;
+    if (item.maxH !== undefined) draftItem.maxH = item.maxH;
+    return draftItem;
+  });
+}
+
+function initialDashboardDraft(dashboardKey: DashboardKey): DashboardDraftEditor {
+  const fallback = createDefaultDashboardDraft(dashboardKey, dashboardLayouts[dashboardKey]);
+  if (typeof window === "undefined") return { current: cloneDashboardDraft(fallback), saved: fallback };
+
+  try {
+    const raw = window.localStorage.getItem(dashboardDraftStorageKey(dashboardKey));
+    const saved = raw ? parseDashboardDraft(raw, dashboardKey, dashboardLayouts[dashboardKey]) ?? fallback : fallback;
+    return { current: cloneDashboardDraft(saved), saved };
+  } catch {
+    return { current: cloneDashboardDraft(fallback), saved: fallback };
+  }
+}
+
 function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBack: () => void }) {
   const theme = dashboardThemes.find((item) => item.key === dashboardKey) ?? dashboardThemes[0];
   const metrics = themeMetrics[dashboardKey];
@@ -793,9 +836,18 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
   const [crossFilter, setCrossFilter] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({ period: "Toda a base", sector: "Todos os setores", priority: "Todas", status: "Todos" });
-  const [layout, setLayout] = useState<Layout>(() => dashboardLayouts[dashboardKey].map((item) => ({ ...item })));
-  const [customWidgets, setCustomWidgets] = useState<CustomWidget[]>([]);
+  const [draftEditor, setDraftEditor] = useState<DashboardDraftEditor>(() => initialDashboardDraft(dashboardKey));
   const { width, containerRef, mounted } = useContainerWidth();
+  const layout = draftEditor.current.layout as Layout;
+  const customWidgets = draftEditor.current.customWidgets;
+  const hasUnsavedChanges = !dashboardDraftsEqual(draftEditor.current, draftEditor.saved);
+
+  function setLayout(updater: Layout | ((current: Layout) => Layout)) {
+    setDraftEditor((state) => {
+      const nextLayout = typeof updater === "function" ? updater(state.current.layout as Layout) : updater;
+      return { ...state, current: { ...state.current, layout: toDraftLayout(nextLayout) } };
+    });
+  }
 
   const scale = useMemo(() => {
     let result = filters.period === "Últimos 30 dias" ? 0.34 : filters.period === "Últimos 90 dias" ? 0.78 : 1;
@@ -810,13 +862,72 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
     window.setTimeout(() => setToast(null), 2600);
   }
 
-  function addWidget(indicatorName: string, visualization: string, formula: string) {
+  function cancelEditing() {
+    setDraftEditor((state) => ({ ...state, current: cloneDashboardDraft(state.saved) }));
+    setEditing(false);
+    flash(hasUnsavedChanges ? "Alterações não salvas descartadas" : "Edição encerrada");
+  }
+
+  function restoreInitialLayout() {
+    const initial = createDefaultDashboardDraft(dashboardKey, dashboardLayouts[dashboardKey]);
+    setDraftEditor((state) => ({ ...state, current: initial }));
+    flash("Layout inicial aplicado; salve para tornar permanente");
+  }
+
+  function saveDraft() {
+    try {
+      const candidate: DashboardDraftSnapshot = {
+        ...draftEditor.current,
+        savedAt: new Date().toISOString(),
+      };
+      const serialized = serializeDashboardDraft(candidate);
+      const normalized = parseDashboardDraft(serialized, dashboardKey, dashboardLayouts[dashboardKey]);
+      if (!normalized) throw new Error("rascunho_inválido");
+      window.localStorage.setItem(dashboardDraftStorageKey(dashboardKey), serializeDashboardDraft(normalized));
+      setDraftEditor({ current: cloneDashboardDraft(normalized), saved: normalized });
+      setEditing(false);
+      flash("Layout e métricas salvos neste navegador");
+    } catch {
+      flash("Não foi possível salvar o rascunho neste navegador");
+    }
+  }
+
+  function addWidget(definition: MetricDefinitionDraft, preview: MetricPreview) {
     const id = `custom-${Date.now()}`;
-    setCustomWidgets((items) => [...items, { id, title: indicatorName, visualization, formula }]);
-    setLayout((items) => [...items, { i: id, x: 0, y: Infinity, w: 6, h: 4, minW: 4, minH: 3 }]);
+    const widget: DraftCustomWidget = {
+      id,
+      title: definition.name,
+      visualization: definition.visualization,
+      formula: preview.formula,
+      definition,
+      preview,
+    };
+    setDraftEditor((state) => {
+      const nextY = state.current.layout.reduce((bottom, item) => Math.max(bottom, item.y + item.h), 0);
+      return {
+        ...state,
+        current: {
+          ...state.current,
+          customWidgets: [...state.current.customWidgets, widget],
+          layout: [...state.current.layout, { i: id, x: 0, y: nextY, w: 6, h: 4, minW: 4, minH: 3 }],
+        },
+      };
+    });
     setBuilderOpen(false);
     setEditing(true);
     flash("Indicador adicionado ao rascunho");
+  }
+
+  function removeCustomWidget(widgetId: string) {
+    setDraftEditor((state) => ({
+      ...state,
+      current: {
+        ...state.current,
+        customWidgets: state.current.customWidgets.filter((widget) => widget.id !== widgetId),
+        layout: state.current.layout.filter((item) => item.i !== widgetId),
+      },
+    }));
+    flash("Métrica removida do rascunho; salve para confirmar");
   }
 
   const scaledDemand = demandSeries.map((item) => ({ ...item, chamados: Math.max(1, Math.round(item.chamados * scale)), concluidos: Math.max(1, Math.round(item.concluidos * scale)) }));
@@ -834,8 +945,8 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
           <button className="button button--ghost" onClick={() => flash("Exportação preparada com os filtros atuais")}><DownloadSimpleIcon size={17} /> Exportar</button>
           {editing ? (
             <>
-              <button className="button button--ghost" onClick={() => { setLayout(dashboardLayouts[dashboardKey].map((item) => ({ ...item }))); flash("Layout inicial restaurado"); }}>Restaurar</button>
-              <button className="button button--primary" onClick={() => { setEditing(false); flash("Layout salvo no rascunho"); }}><FloppyDiskIcon size={17} /> Salvar layout</button>
+              <button className="button button--ghost" onClick={restoreInitialLayout}>Restaurar</button>
+              <button className="button button--primary" disabled={!hasUnsavedChanges} onClick={saveDraft}><FloppyDiskIcon size={17} /> Salvar layout</button>
             </>
           ) : (
             <button className="button button--ghost" onClick={() => setEditing(true)}><PencilSimpleIcon size={17} /> Editar layout</button>
@@ -857,7 +968,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
       {filtersOpen && <FilterPanel filters={filters} onChange={setFilters} onClose={() => setFiltersOpen(false)} />}
 
       {editing && (
-        <div className="edit-notice"><PencilSimpleIcon size={16} /><span><strong>Modo de edição ativo.</strong> Arraste qualquer cartão pelo cabeçalho, solte em outra posição e redimensione por qualquer lateral ou canto.</span><button onClick={() => setEditing(false)}>Cancelar</button></div>
+        <div className="edit-notice"><PencilSimpleIcon size={16} /><span><strong>{hasUnsavedChanges ? "Alterações ainda não salvas." : "Modo de edição ativo."}</strong> Arraste e redimensione livremente; somente “Salvar layout” torna as mudanças permanentes.</span><button onClick={cancelEditing}>Cancelar</button></div>
       )}
 
       <div className="dashboard-grid-wrap" ref={containerRef}>
@@ -869,7 +980,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
             dragConfig={{ enabled: editing, handle: ".widget-drag-handle", bounded: true }}
             resizeConfig={{ enabled: editing, handles: ["n", "e", "s", "w", "ne", "nw", "se", "sw"] }}
             compactor={noCompactor}
-            onLayoutChange={(nextLayout) => setLayout([...nextLayout])}
+            onLayoutChange={(nextLayout) => { if (editing) setLayout([...nextLayout]); }}
           >
 
             {visibleMetrics.map((metric) => (
@@ -882,8 +993,28 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
 
             {customWidgets.map((widget) => (
               <div key={widget.id}>
-                <WidgetFrame title={widget.title} subtitle={`${widget.visualization} · métrica calculada`} editing={editing}>
-                  <div className="custom-widget-state"><ChartBarIcon size={34} weight="duotone" /><strong>Fórmula validada</strong><span>{widget.formula}</span></div>
+                <WidgetFrame
+                  title={widget.title}
+                  subtitle={`${widget.visualization} · métrica calculada`}
+                  editing={editing}
+                  action={editing ? (
+                    <button
+                      className="widget-action--danger"
+                      aria-label={`Remover métrica ${widget.title}`}
+                      title="Remover do rascunho"
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={(event) => { event.stopPropagation(); removeCustomWidget(widget.id); }}
+                    >
+                      <TrashIcon size={15} />
+                    </button>
+                  ) : undefined}
+                >
+                  <div className="custom-widget-state">
+                    <ChartBarIcon size={30} weight="duotone" />
+                    <strong className="custom-widget-state__value">{widget.preview.formattedValue}</strong>
+                    <span>{widget.formula}</span>
+                    <small>N = {widget.preview.sampleSize} · cobertura {widget.preview.coverage.toLocaleString("pt-BR")}%</small>
+                  </div>
                 </WidgetFrame>
               </div>
             ))}
@@ -912,39 +1043,121 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
   );
 }
 
-function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: DashboardKey; onClose: () => void; onAdd: (indicator: string, visualization: string, formula: string) => void }) {
+const aggregationLabels: Record<AggregationOperation, string> = {
+  contagem: "Contagem",
+  contagem_distinta: "Contagem distinta",
+  soma: "Soma",
+  média: "Média",
+  mediana: "Mediana",
+  percentil: "P90",
+  mínimo: "Mínimo",
+  máximo: "Máximo",
+};
+
+function aggregationsFor(field: DataField): AggregationOperation[] {
+  if (field.type === "número" || field.type === "duração") {
+    return ["contagem", "soma", "média", "mediana", "percentil", "mínimo", "máximo"];
+  }
+  return ["contagem", "contagem_distinta"];
+}
+
+type PreviewState = {
+  status: "idle" | "validating" | "valid" | "invalid";
+  preview: MetricPreview | null;
+  errors: string[];
+};
+
+function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: DashboardKey; onClose: () => void; onAdd: (definition: MetricDefinitionDraft, preview: MetricPreview) => void }) {
   const [metricName, setMetricName] = useState("Índice de carga operacional");
+  const [metricDescription, setMetricDescription] = useState("Relação calculada entre os dados selecionados.");
   const [fieldAId, setFieldAId] = useState("ticket-count");
   const [fieldBId, setFieldBId] = useState("event-count");
+  const [aggregationA, setAggregationA] = useState<AggregationOperation>("contagem");
+  const [aggregationB, setAggregationB] = useState<AggregationOperation>("contagem");
   const [activeSlot, setActiveSlot] = useState<"a" | "b">("a");
-  const [operator, setOperator] = useState<"multiply" | "divide" | "add" | "subtract">("multiply");
+  const [operator, setOperator] = useState<BinaryOperation>("multiplicar");
   const [divisor, setDivisor] = useState("30");
-  const [dimensionId, setDimensionId] = useState("opened-at");
-  const [visualization, setVisualization] = useState("Cartão numérico");
+  const [dimensionId, setDimensionId] = useState("");
+  const [visualization, setVisualization] = useState<MetricVisualization>("Cartão numérico");
   const [coverage, setCoverage] = useState(80);
   const [search, setSearch] = useState("");
+  const [previewState, setPreviewState] = useState<PreviewState>({ status: "idle", preview: null, errors: [] });
+
   const filteredFields = dataFields.filter((item) => item.label.toLowerCase().includes(search.toLowerCase()) || item.source.toLowerCase().includes(search.toLowerCase()));
   const fieldA = dataFields.find((item) => item.id === fieldAId) ?? dataFields[0];
   const fieldB = dataFields.find((item) => item.id === fieldBId) ?? dataFields[1];
   const dimensions = dataFields.filter((item) => item.type === "categoria" || item.type === "data" || item.type === "booleano");
   const dimension = dataFields.find((item) => item.id === dimensionId);
-  const operatorLabel = { multiply: "×", divide: "÷", add: "+", subtract: "−" }[operator];
-  const formula = `Contagem(${fieldA.label}) ${operatorLabel} Contagem(${fieldB.label}) ÷ ${divisor || "?"}`;
-  const errors = [
-    metricName.trim().length < 3 ? "Dê um nome com pelo menos 3 caracteres." : null,
-    !Number.isFinite(Number(divisor)) || Number(divisor) <= 0 ? "O divisor deve ser um número maior que zero." : null,
-    visualization === "Linha temporal" && dimension?.type !== "data" ? "Linha temporal exige uma dimensão de data." : null,
-  ].filter(Boolean) as string[];
-  const crossSourceWarning = fieldA.source !== fieldB.source;
+
+  const definition = useMemo<MetricDefinitionDraft>(() => ({
+    name: metricName.trim(),
+    description: metricDescription.trim(),
+    expression: {
+      kind: "operação",
+      operation: "dividir",
+      left: {
+        kind: "operação",
+        operation: operator,
+        left: { kind: "agregação", operation: aggregationA, input: { kind: "campo", fieldId: fieldA.id }, ...(aggregationA === "percentil" ? { percentile: 90 } : {}) },
+        right: { kind: "agregação", operation: aggregationB, input: { kind: "campo", fieldId: fieldB.id }, ...(aggregationB === "percentil" ? { percentile: 90 } : {}) },
+      },
+      right: { kind: "constante", value: Number(divisor) },
+    },
+    dimensionFieldId: dimensionId || null,
+    visualization,
+    coverageThreshold: coverage,
+    nullPolicy: "ignorar",
+  }), [aggregationA, aggregationB, coverage, dimensionId, divisor, fieldA.id, fieldB.id, metricDescription, metricName, operator, visualization]);
+
+  const clientValidation = useMemo(() => validateMetricDefinition(definition, dataFields), [definition]);
+  const formula = useMemo(() => formatMetricExpression(definition.expression, dataFields), [definition.expression]);
+
+  useEffect(() => {
+    if (!clientValidation.valid) return;
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setPreviewState({ status: "validating", preview: null, errors: [] });
+      try {
+        const response = await fetch("/api/metrics/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(definition),
+          signal: controller.signal,
+        });
+        const result = await response.json() as { ok: boolean; preview?: MetricPreview; errors?: Array<{ message: string }> };
+        if (response.ok && result.ok && result.preview) {
+          setPreviewState({ status: "valid", preview: result.preview, errors: [] });
+        } else {
+          setPreviewState({ status: "invalid", preview: null, errors: result.errors?.map((error) => error.message) ?? ["O servidor recusou a definição."] });
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setPreviewState({ status: "invalid", preview: null, errors: ["Não foi possível validar a métrica no servidor."] });
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [clientValidation.valid, definition]);
 
   function selectField(field: DataField) {
     if (activeSlot === "a") {
       setFieldAId(field.id);
+      if (!aggregationsFor(field).includes(aggregationA)) setAggregationA("contagem");
       setActiveSlot("b");
     } else {
       setFieldBId(field.id);
+      if (!aggregationsFor(field).includes(aggregationB)) setAggregationB("contagem");
     }
   }
+
+  const activePreview = clientValidation.valid ? previewState.preview : null;
+  const effectivePreviewStatus = clientValidation.valid ? previewState.status : "idle";
+  const displayedErrors = [...clientValidation.errors.map((error) => error.message), ...(clientValidation.valid ? previewState.errors : [])];
+  const readyToAdd = clientValidation.valid && effectivePreviewStatus === "valid" && activePreview;
 
   return (
     <div className="modal-layer" onMouseDown={onClose}>
@@ -963,28 +1176,40 @@ function IndicatorBuilder({ dashboardKey, onClose, onAdd }: { dashboardKey: Dash
           <div className="builder-column builder-column--formula">
             <label>2. Fórmula</label>
             <label className="field-label">Nome da métrica<input className="builder-text-input" value={metricName} onChange={(event) => setMetricName(event.target.value)} aria-invalid={metricName.trim().length < 3} /></label>
+            <label className="field-label">Descrição<input className="builder-text-input" value={metricDescription} onChange={(event) => setMetricDescription(event.target.value)} /></label>
+            <div className="aggregation-row">
+              <label>Dado 1<select value={aggregationA} onChange={(event) => setAggregationA(event.target.value as AggregationOperation)}>{aggregationsFor(fieldA).map((item) => <option key={item} value={item}>{aggregationLabels[item]}</option>)}</select></label>
+              <label>Dado 2<select value={aggregationB} onChange={(event) => setAggregationB(event.target.value as AggregationOperation)}>{aggregationsFor(fieldB).map((item) => <option key={item} value={item}>{aggregationLabels[item]}</option>)}</select></label>
+            </div>
             <div className="formula-canvas">
-              <button className={activeSlot === "a" ? "is-active" : ""} onClick={() => setActiveSlot("a")}><span>Dado 1</span><strong>Contagem · {fieldA.label}</strong><small>{fieldA.source}</small></button>
-              <select aria-label="Operador principal" value={operator} onChange={(event) => setOperator(event.target.value as typeof operator)}><option value="multiply">× Multiplicar</option><option value="divide">÷ Dividir</option><option value="add">+ Somar</option><option value="subtract">− Subtrair</option></select>
-              <button className={activeSlot === "b" ? "is-active" : ""} onClick={() => setActiveSlot("b")}><span>Dado 2</span><strong>Contagem · {fieldB.label}</strong><small>{fieldB.source}</small></button>
+              <button className={activeSlot === "a" ? "is-active" : ""} onClick={() => setActiveSlot("a")}><span>Dado 1</span><strong>{aggregationLabels[aggregationA]} · {fieldA.label}</strong><small>{fieldA.source}</small></button>
+              <select aria-label="Operador principal" value={operator} onChange={(event) => setOperator(event.target.value as BinaryOperation)}><option value="multiplicar">× Multiplicar</option><option value="dividir">÷ Dividir</option><option value="somar">+ Somar</option><option value="subtrair">− Subtrair</option></select>
+              <button className={activeSlot === "b" ? "is-active" : ""} onClick={() => setActiveSlot("b")}><span>Dado 2</span><strong>{aggregationLabels[aggregationB]} · {fieldB.label}</strong><small>{fieldB.source}</small></button>
               <span className="formula-divider">÷</span>
-              <label className="formula-constant"><span>Constante</span><input type="number" value={divisor} onChange={(event) => setDivisor(event.target.value)} min="0.01" step="0.01" aria-invalid={!Number.isFinite(Number(divisor)) || Number(divisor) <= 0} /></label>
+              <label className="formula-constant"><span>Constante</span><input type="number" value={divisor} onChange={(event) => setDivisor(event.target.value)} step="0.01" aria-invalid={!Number.isFinite(Number(divisor)) || Number(divisor) === 0} /></label>
             </div>
             <div className="formula-readable"><span>Expressão resultante</span><code>{formula}</code></div>
-            {crossSourceWarning && <div className="builder-warning"><WarningCircleIcon size={17} weight="fill" /><span><strong>Cobertura combinada limitada</strong><small>Esta fórmula cruza Chamados e Histórico. O resultado usará somente os 37 chamados com movimentações vinculadas.</small></span></div>}
-            {errors.length > 0 && <div className="builder-errors" role="alert"><strong>Corrija antes de adicionar</strong>{errors.map((error) => <span key={error}><WarningCircleIcon size={13} />{error}</span>)}</div>}
+            {clientValidation.warnings.map((warning) => <div className="builder-warning" key={warning.code}><WarningCircleIcon size={17} weight="fill" /><span><strong>Cobertura combinada limitada</strong><small>{warning.message}</small></span></div>)}
+            {displayedErrors.length > 0 && <div className="builder-errors" role="alert"><strong>Corrija antes de adicionar</strong>{displayedErrors.map((error) => <span key={error}><WarningCircleIcon size={13} />{error}</span>)}</div>}
           </div>
 
           <div className="builder-column builder-column--preview">
             <label>3. Contexto e visualização</label>
-            <label className="field-label">Segmentar por<select value={dimensionId} onChange={(event) => setDimensionId(event.target.value)}>{dimensions.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}</select></label>
-            <label className="field-label">Visualização<select value={visualization} onChange={(event) => setVisualization(event.target.value)}><option>Cartão numérico</option><option>Barras horizontais</option><option>Colunas</option><option>Linha temporal</option><option>Barra 100% empilhada</option></select></label>
+            <label className="field-label">Segmentar por<select value={dimensionId} onChange={(event) => setDimensionId(event.target.value)}><option value="">Sem segmentação</option>{dimensions.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}</select></label>
+            <label className="field-label">Visualização<select value={visualization} onChange={(event) => setVisualization(event.target.value as MetricVisualization)}><option>Cartão numérico</option><option>Barras horizontais</option><option>Colunas</option><option>Linha temporal</option><option>Barra 100% empilhada</option></select></label>
             <label className="field-label">Cobertura mínima<div className="coverage-input"><input type="range" value={coverage} min="0" max="100" onChange={(event) => setCoverage(Number(event.target.value))} /><strong>{coverage}%</strong></div></label>
-            <div className="builder-preview builder-preview--formula"><span>Prévia da definição</span><ChartBarIcon size={34} weight="duotone" /><strong>{metricName || "Métrica sem nome"}</strong><small>{visualization} · por {dimension?.label}</small><code>{operatorLabel} ÷ {divisor || "?"}</code></div>
-            <div className="quality-note"><InfoIcon size={17} /><span><strong>Validação em duas etapas</strong><small>O navegador valida tipos e campos; o backend recalcula, limita recursos e nunca executa texto livre.</small></span></div>
+            <div className="builder-preview builder-preview--formula">
+              <span>{effectivePreviewStatus === "validating" ? "Validando no servidor..." : "Prévia calculada no servidor"}</span>
+              <ChartBarIcon size={30} weight="duotone" />
+              <strong>{activePreview?.formattedValue ?? (clientValidation.valid ? "Aguardando cálculo" : "Definição incompleta")}</strong>
+              <small>{visualization}{dimension ? ` · por ${dimension.label}` : " · valor único"}</small>
+              <code>{activePreview ? `N = ${activePreview.sampleSize} · ${activePreview.coverage.toLocaleString("pt-BR")}%` : formula}</code>
+            </div>
+            {activePreview?.warnings.map((warning) => <div className="builder-warning" key={warning.code}><WarningCircleIcon size={17} weight="fill" /><span><strong>Atenção à interpretação</strong><small>{warning.message}</small></span></div>)}
+            <div className="quality-note"><InfoIcon size={17} /><span><strong>Validação em duas etapas</strong><small>O navegador dá retorno imediato; o servidor repete as regras e é o único que calcula a prévia.</small></span></div>
           </div>
         </div>
-        <footer><span className="builder-footer-status">{errors.length ? `${errors.length} validação(ões) pendente(s)` : "Fórmula válida para salvar como rascunho"}</span><button className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={errors.length > 0} onClick={() => onAdd(metricName.trim(), visualization, formula)}><PlusIcon size={16} />Adicionar ao rascunho</button></footer>
+        <footer><span className="builder-footer-status">{effectivePreviewStatus === "validating" ? "Validando AST no servidor..." : readyToAdd ? "Fórmula válida e prévia confirmada" : `${displayedErrors.length} validação(ões) pendente(s)`}</span><button className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={!readyToAdd} onClick={() => { if (activePreview) onAdd(definition, activePreview); }}><PlusIcon size={16} />Adicionar ao rascunho</button></footer>
       </section>
     </div>
   );
