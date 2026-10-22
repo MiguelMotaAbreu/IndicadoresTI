@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   experimental: {
     agentFeedback: true,
+    optimizePackageImports: ["@phosphor-icons/react", "recharts"],
   },
   cacheComponents: true,
   partialPrefetching: true,
