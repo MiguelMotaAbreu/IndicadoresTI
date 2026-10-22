@@ -20,6 +20,10 @@
 # production
 /build
 
+# local persistent data
+/data/*.sqlite*
+/.tmp/
+
 # misc
 .DS_Store
 *.pem

@@ -143,7 +143,10 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .dashboard-card__foot > span { display: flex; align-items: center; gap: 3px; color: var(--green-700); font-weight: 700; }
 
 .back-link { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--green-700); cursor: pointer; padding: 0; font-size: 10px; font-weight: 650; }
-.dashboard-heading__actions { display: flex; gap: 8px; }
+.dashboard-heading__actions { display: flex; align-items: center; gap: 8px; }
+.draft-persistence { height: 28px; display: inline-flex; align-items: center; gap: 5px; border-radius: 99px; background: var(--green-50); color: var(--green-700); padding: 0 9px; font-size: 8.5px; font-weight: 650; white-space: nowrap; }
+.draft-persistence--loading, .draft-persistence--saving { background: var(--surface-muted); color: var(--ink-faint); }
+.draft-persistence--error { background: #fff3e5; color: #9b681c; }
 .button { height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--line-strong); border-radius: 10px; cursor: pointer; padding: 0 13px; font-size: 10px; font-weight: 680; transition: transform 140ms ease, background 140ms ease; }
 .button:hover { transform: translateY(-1px); }
 .button:disabled { cursor: not-allowed; opacity: 0.65; transform: none; }

@@ -108,6 +108,7 @@ import {
   type DraftCustomWidget,
   type DraftLayoutItem,
 } from "./lib/dashboard-drafts";
+import { dashboardLayouts } from "./lib/dashboard-layouts";
 
 type View = "login" | "catalog" | "dashboard" | "admin";
 type AdminSection = "sync" | "users" | "mapping" | "health" | "audit";
@@ -125,68 +126,6 @@ type MetricDefinition = {
   title: string;
   delta: string;
   tone?: "default" | "primary" | "warning";
-};
-
-const dashboardLayouts: Record<DashboardKey, Layout> = {
-  overview: [
-    { i: "metric-total", x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-average", x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-sla", x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-pending", x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "overview-demand", x: 0, y: 2, w: 8, h: 5, minW: 4, minH: 4 },
-    { i: "overview-status", x: 8, y: 2, w: 4, h: 5, minW: 3, minH: 4 },
-    { i: "overview-reason", x: 0, y: 7, w: 5, h: 5, minW: 4, minH: 4 },
-    { i: "overview-priority", x: 5, y: 7, w: 7, h: 5, minW: 4, minH: 4 },
-  ],
-  demand: [
-    { i: "metric-total", x: 0, y: 0, w: 4, h: 2, minW: 2, minH: 2 },
-    { i: "metric-average", x: 4, y: 0, w: 2, h: 2, minW: 2, minH: 2 },
-    { i: "metric-variation", x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-reasons", x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "demand-trend", x: 0, y: 2, w: 7, h: 5, minW: 4, minH: 4 },
-    { i: "demand-heatmap", x: 7, y: 2, w: 5, h: 5, minW: 4, minH: 4 },
-    { i: "demand-reasons", x: 0, y: 7, w: 5, h: 5, minW: 4, minH: 4 },
-    { i: "demand-pareto", x: 5, y: 7, w: 7, h: 5, minW: 4, minH: 4 },
-  ],
-  pending: [
-    { i: "metric-total", x: 0, y: 0, w: 4, h: 3, minW: 3, minH: 2 },
-    { i: "metric-age", x: 4, y: 0, w: 3, h: 3, minW: 2, minH: 2 },
-    { i: "metric-supplier", x: 7, y: 0, w: 2, h: 3, minW: 2, minH: 2 },
-    { i: "metric-owner", x: 9, y: 0, w: 3, h: 3, minW: 2, minH: 2 },
-    { i: "pending-age", x: 0, y: 3, w: 8, h: 5, minW: 4, minH: 4 },
-    { i: "pending-oldest", x: 8, y: 3, w: 4, h: 5, minW: 3, minH: 4 },
-    { i: "pending-composition", x: 0, y: 8, w: 12, h: 5, minW: 6, minH: 4 },
-  ],
-  sla: [
-    { i: "metric-evaluated", x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-median", x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-p90", x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-coverage", x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "sla-histogram", x: 0, y: 2, w: 7, h: 5, minW: 4, minH: 4 },
-    { i: "sla-compliance", x: 7, y: 2, w: 5, h: 5, minW: 4, minH: 4 },
-    { i: "sla-comparison", x: 0, y: 7, w: 8, h: 5, minW: 5, minH: 4 },
-    { i: "sla-coverage", x: 8, y: 7, w: 4, h: 5, minW: 3, minH: 4 },
-  ],
-  movement: [
-    { i: "metric-events", x: 0, y: 0, w: 4, h: 2, minW: 2, minH: 2 },
-    { i: "metric-tickets", x: 4, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-resumed", x: 7, y: 0, w: 2, h: 2, minW: 2, minH: 2 },
-    { i: "metric-supplier", x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "movement-types", x: 0, y: 2, w: 7, h: 5, minW: 4, minH: 4 },
-    { i: "movement-timeline", x: 7, y: 2, w: 5, h: 5, minW: 4, minH: 4 },
-    { i: "movement-stages", x: 0, y: 7, w: 9, h: 5, minW: 5, minH: 4 },
-    { i: "movement-coverage", x: 9, y: 7, w: 3, h: 5, minW: 3, minH: 4 },
-  ],
-  quality: [
-    { i: "metric-start", x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-finish", x: 3, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-history", x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "metric-errors", x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-    { i: "quality-coverage", x: 0, y: 2, w: 8, h: 6, minW: 5, minH: 4 },
-    { i: "quality-score", x: 8, y: 2, w: 4, h: 6, minW: 3, minH: 4 },
-    { i: "quality-errors", x: 0, y: 8, w: 7, h: 5, minW: 4, minH: 4 },
-    { i: "quality-rules", x: 7, y: 8, w: 5, h: 5, minW: 4, minH: 4 },
-  ],
 };
 
 const themeIcons = {
@@ -803,6 +742,14 @@ type DashboardDraftEditor = {
   saved: DashboardDraftSnapshot;
 };
 
+type DraftPersistenceStatus = "loading" | "ready" | "saving" | "error";
+
+type DashboardDraftApiResponse = {
+  ok: boolean;
+  draft?: DashboardDraftSnapshot | null;
+  error?: string;
+};
+
 function toDraftLayout(layout: Layout): DraftLayoutItem[] {
   return layout.map((item) => {
     const draftItem: DraftLayoutItem = { i: item.i, x: item.x, y: item.y, w: item.w, h: item.h };
@@ -816,15 +763,12 @@ function toDraftLayout(layout: Layout): DraftLayoutItem[] {
 
 function initialDashboardDraft(dashboardKey: DashboardKey): DashboardDraftEditor {
   const fallback = createDefaultDashboardDraft(dashboardKey, dashboardLayouts[dashboardKey]);
-  if (typeof window === "undefined") return { current: cloneDashboardDraft(fallback), saved: fallback };
+  return { current: cloneDashboardDraft(fallback), saved: fallback };
+}
 
-  try {
-    const raw = window.localStorage.getItem(dashboardDraftStorageKey(dashboardKey));
-    const saved = raw ? parseDashboardDraft(raw, dashboardKey, dashboardLayouts[dashboardKey]) ?? fallback : fallback;
-    return { current: cloneDashboardDraft(saved), saved };
-  } catch {
-    return { current: cloneDashboardDraft(fallback), saved: fallback };
-  }
+function normalizeApiDraft(payload: DashboardDraftApiResponse, dashboardKey: DashboardKey): DashboardDraftSnapshot | null {
+  if (!payload.draft) return null;
+  return parseDashboardDraft(serializeDashboardDraft(payload.draft), dashboardKey, dashboardLayouts[dashboardKey]);
 }
 
 function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBack: () => void }) {
@@ -839,11 +783,82 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
   const [toast, setToast] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({ period: "Toda a base", sector: "Todos os setores", priority: "Todas", status: "Todos" });
   const [draftEditor, setDraftEditor] = useState<DashboardDraftEditor>(() => initialDashboardDraft(dashboardKey));
+  const [draftPersistenceStatus, setDraftPersistenceStatus] = useState<DraftPersistenceStatus>("loading");
   const { width, containerRef, mounted } = useContainerWidth();
   const layout = draftEditor.current.layout as Layout;
   const customWidgets = draftEditor.current.customWidgets;
   const builderWidget = builderWidgetId ? customWidgets.find((widget) => widget.id === builderWidgetId) ?? null : null;
   const hasUnsavedChanges = !dashboardDraftsEqual(draftEditor.current, draftEditor.saved);
+  const persistenceBusy = draftPersistenceStatus === "loading" || draftPersistenceStatus === "saving";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    let toastTimer: number | undefined;
+
+    async function loadDraft() {
+      setDraftPersistenceStatus("loading");
+      try {
+        const response = await fetch(`/api/dashboard-drafts/${dashboardKey}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = await response.json() as DashboardDraftApiResponse;
+        if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Não foi possível carregar o painel.");
+
+        let saved = normalizeApiDraft(payload, dashboardKey);
+        if (payload.draft && !saved) throw new Error("O servidor retornou um rascunho incompatível.");
+
+        if (!saved) {
+          const legacyKey = dashboardDraftStorageKey(dashboardKey);
+          let legacyRaw: string | null = null;
+          try {
+            legacyRaw = window.localStorage.getItem(legacyKey);
+          } catch {
+            // O servidor continua sendo a fonte principal mesmo sem acesso ao armazenamento legado.
+          }
+          const legacyDraft = legacyRaw ? parseDashboardDraft(legacyRaw, dashboardKey, dashboardLayouts[dashboardKey]) : null;
+
+          if (legacyDraft) {
+            const migrationResponse = await fetch(`/api/dashboard-drafts/${dashboardKey}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: serializeDashboardDraft(legacyDraft),
+              signal: controller.signal,
+            });
+            const migrationPayload = await migrationResponse.json() as DashboardDraftApiResponse;
+            saved = normalizeApiDraft(migrationPayload, dashboardKey);
+            if (!migrationResponse.ok || !migrationPayload.ok || !saved) {
+              throw new Error(migrationPayload.error ?? "Não foi possível migrar o rascunho local.");
+            }
+            window.localStorage.removeItem(legacyKey);
+            if (active) {
+              setToast("Rascunho local migrado para o servidor");
+              toastTimer = window.setTimeout(() => setToast(null), 2600);
+            }
+          }
+        }
+
+        if (!active) return;
+        const resolved = saved ?? createDefaultDashboardDraft(dashboardKey, dashboardLayouts[dashboardKey]);
+        setDraftEditor({ current: cloneDashboardDraft(resolved), saved: resolved });
+        setDraftPersistenceStatus("ready");
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!active) return;
+        setDraftPersistenceStatus("error");
+        setToast("Não foi possível carregar o rascunho do servidor");
+        toastTimer = window.setTimeout(() => setToast(null), 2600);
+      }
+    }
+
+    void loadDraft();
+    return () => {
+      active = false;
+      controller.abort();
+      if (toastTimer !== undefined) window.clearTimeout(toastTimer);
+    };
+  }, [dashboardKey]);
 
   function setLayout(updater: Layout | ((current: Layout) => Layout)) {
     setDraftEditor((state) => {
@@ -877,7 +892,8 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
     flash("Layout inicial aplicado; salve para tornar permanente");
   }
 
-  function saveDraft() {
+  async function saveDraft() {
+    if (draftPersistenceStatus === "saving") return;
     try {
       const candidate: DashboardDraftSnapshot = {
         ...draftEditor.current,
@@ -886,12 +902,27 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
       const serialized = serializeDashboardDraft(candidate);
       const normalized = parseDashboardDraft(serialized, dashboardKey, dashboardLayouts[dashboardKey]);
       if (!normalized) throw new Error("rascunho_inválido");
-      window.localStorage.setItem(dashboardDraftStorageKey(dashboardKey), serializeDashboardDraft(normalized));
-      setDraftEditor({ current: cloneDashboardDraft(normalized), saved: normalized });
+
+      setDraftPersistenceStatus("saving");
       setEditing(false);
-      flash("Layout e métricas salvos neste navegador");
+      const response = await fetch(`/api/dashboard-drafts/${dashboardKey}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: serializeDashboardDraft(normalized),
+      });
+      const payload = await response.json() as DashboardDraftApiResponse;
+      const saved = normalizeApiDraft(payload, dashboardKey);
+      if (!response.ok || !payload.ok || !saved) throw new Error(payload.error ?? "rascunho_não_salvo");
+
+      window.localStorage.removeItem(dashboardDraftStorageKey(dashboardKey));
+      setDraftEditor({ current: cloneDashboardDraft(saved), saved });
+      setDraftPersistenceStatus("ready");
+      setEditing(false);
+      flash("Layout e métricas salvos no servidor");
     } catch {
-      flash("Não foi possível salvar o rascunho neste navegador");
+      setDraftPersistenceStatus("error");
+      setEditing(true);
+      flash("Não foi possível salvar o rascunho no servidor");
     }
   }
 
@@ -972,16 +1003,20 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
           <p>{theme.description}</p>
         </div>
         <div className="dashboard-heading__actions">
+          <span className={`draft-persistence draft-persistence--${draftPersistenceStatus}`} role="status">
+            {draftPersistenceStatus === "error" ? <WarningCircleIcon size={15} weight="fill" /> : persistenceBusy ? <ArrowsClockwiseIcon className="spin" size={15} /> : <CloudCheckIcon size={15} weight="fill" />}
+            {draftPersistenceStatus === "loading" ? "Carregando painel" : draftPersistenceStatus === "saving" ? "Salvando" : draftPersistenceStatus === "error" ? "Servidor indisponível" : "Painel sincronizado"}
+          </span>
           <button className="button button--ghost" onClick={() => flash("Exportação preparada com os filtros atuais")}><DownloadSimpleIcon size={17} /> Exportar</button>
           {editing ? (
             <>
-              <button className="button button--ghost" onClick={restoreInitialLayout}>Restaurar</button>
-              <button className="button button--primary" disabled={!hasUnsavedChanges} onClick={saveDraft}><FloppyDiskIcon size={17} /> Salvar layout</button>
+              <button className="button button--ghost" disabled={persistenceBusy} onClick={restoreInitialLayout}>Restaurar</button>
+              <button className="button button--primary" disabled={!hasUnsavedChanges || persistenceBusy} onClick={() => void saveDraft()}><FloppyDiskIcon size={17} /> {draftPersistenceStatus === "saving" ? "Salvando..." : "Salvar layout"}</button>
             </>
           ) : (
-            <button className="button button--ghost" onClick={() => setEditing(true)}><PencilSimpleIcon size={17} /> Editar layout</button>
+            <button className="button button--ghost" disabled={persistenceBusy} onClick={() => setEditing(true)}><PencilSimpleIcon size={17} /> Editar layout</button>
           )}
-          <button className="button button--primary" onClick={() => { setBuilderWidgetId(null); setBuilderOpen(true); }}><PlusIcon size={17} /> Indicador</button>
+          <button className="button button--primary" disabled={persistenceBusy} onClick={() => { setBuilderWidgetId(null); setBuilderOpen(true); }}><PlusIcon size={17} /> Indicador</button>
         </div>
       </div>
 
