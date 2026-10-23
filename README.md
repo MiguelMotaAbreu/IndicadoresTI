@@ -38,7 +38,22 @@ A versão atual cria:
 - `dashboard_drafts`: layouts e métricas personalizadas por usuário e painel.
 - `users`: estrutura para administradores e analistas, incluindo hash de senha, troca obrigatória e desativação de conta.
 
-A tabela de usuários é apenas a base da próxima fatia. Nenhuma conta ou senha padrão é criada automaticamente e a tela de login ainda não utiliza essa tabela.
+A tela de login ainda não utiliza essa tabela. A primeira conta é criada uma única vez pelo comando de bootstrap abaixo; nenhuma conta ou senha padrão é incluída no código.
+
+### Primeiro administrador
+
+No PowerShell, informe email e nome por variáveis de ambiente e execute:
+
+```powershell
+$env:PULSETI_BOOTSTRAP_ADMIN_EMAIL="administrador@upa.local"
+$env:PULSETI_BOOTSTRAP_ADMIN_NAME="Administrador local"
+npm run bootstrap:admin
+Remove-Item Env:PULSETI_BOOTSTRAP_ADMIN_EMAIL, Env:PULSETI_BOOTSTRAP_ADMIN_NAME
+```
+
+O comando gera uma senha temporária criptograficamente aleatória, mostra-a uma única vez e marca a troca como obrigatória. Para definir a senha temporária manualmente, use `PULSETI_BOOTSTRAP_ADMIN_PASSWORD`; ela deve ter entre 12 e 128 caracteres e deve ser removida do ambiente após a execução.
+
+O bootstrap falha de forma segura se já existir qualquer usuário. A senha é armazenada somente como um hash `scrypt` com salt individual; o valor original não é gravado no banco nem nos logs da aplicação.
 
 ## Verificações
 
