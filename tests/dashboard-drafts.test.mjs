@@ -72,6 +72,17 @@ test("rejeita layout incompleto ou adulterado", () => {
   assert.equal(parseDashboardDraft(serializeDashboardDraft(snapshot), "overview", defaultLayout), null);
 });
 
+test("repara uma cadeia de sobreposições presente em rascunho antigo", () => {
+  const snapshot = createDefaultDashboardDraft("overview", defaultLayout);
+  snapshot.layout[1].y = 1;
+
+  const restored = parseDashboardDraft(serializeDashboardDraft(snapshot), "overview", defaultLayout);
+
+  assert.ok(restored);
+  assert.equal(restored.layout[0].y, 0);
+  assert.equal(restored.layout[1].y, 2);
+});
+
 test("mudança de data de salvamento não marca o conteúdo como alterado", () => {
   const left = createDefaultDashboardDraft("overview", defaultLayout);
   const right = createDefaultDashboardDraft("overview", defaultLayout);

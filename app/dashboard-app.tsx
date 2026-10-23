@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import ReactGridLayout, {
   type Layout,
-  noCompactor,
   useContainerWidth,
 } from "react-grid-layout";
 import {
@@ -109,6 +108,7 @@ import {
   type DraftLayoutItem,
 } from "./lib/dashboard-drafts";
 import { dashboardLayouts } from "./lib/dashboard-layouts";
+import { collisionSafeFreeCompactor, resolveDashboardLayoutCollisions } from "./lib/dashboard-layout-collisions";
 
 type View = "login" | "catalog" | "dashboard" | "admin";
 type AdminSection = "sync" | "users" | "mapping" | "health" | "audit";
@@ -751,7 +751,7 @@ type DashboardDraftApiResponse = {
 };
 
 function toDraftLayout(layout: Layout): DraftLayoutItem[] {
-  return layout.map((item) => {
+  const draftLayout = layout.map((item) => {
     const draftItem: DraftLayoutItem = { i: item.i, x: item.x, y: item.y, w: item.w, h: item.h };
     if (item.minW !== undefined) draftItem.minW = item.minW;
     if (item.minH !== undefined) draftItem.minH = item.minH;
@@ -759,6 +759,7 @@ function toDraftLayout(layout: Layout): DraftLayoutItem[] {
     if (item.maxH !== undefined) draftItem.maxH = item.maxH;
     return draftItem;
   });
+  return resolveDashboardLayoutCollisions(draftLayout);
 }
 
 function initialDashboardDraft(dashboardKey: DashboardKey): DashboardDraftEditor {
@@ -1044,7 +1045,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
             gridConfig={{ cols: 12, rowHeight: 31, margin: [10, 10], containerPadding: [0, 0] }}
             dragConfig={{ enabled: editing, handle: ".widget-drag-handle", bounded: true }}
             resizeConfig={{ enabled: editing, handles: ["n", "e", "s", "w", "ne", "nw", "se", "sw"] }}
-            compactor={noCompactor}
+            compactor={collisionSafeFreeCompactor}
             onLayoutChange={(nextLayout) => { if (editing) setLayout([...nextLayout]); }}
           >
 

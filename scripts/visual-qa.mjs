@@ -1,7 +1,7 @@
 import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 
-const outputDir = "qa-artifacts";
+const outputDir = process.env.QA_ARTIFACT_DIR ?? "qa-artifacts";
 const baseUrl = process.env.QA_BASE_URL ?? "http://127.0.0.1:3000";
 await mkdir(outputDir, { recursive: true });
 
@@ -25,6 +25,33 @@ async function check(name, action) {
     checks.push({ name, passed: true });
   } catch (error) {
     checks.push({ name, passed: false, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function assertGridItemsDoNotOverlap() {
+  const boxes = await page.locator(".dashboard-grid-wrap .react-grid-item").evaluateAll((items) => items.map((item) => {
+    const box = item.getBoundingClientRect();
+    return {
+      label: item.textContent?.trim().slice(0, 80) || "item sem identificação",
+      left: box.left,
+      right: box.right,
+      top: box.top,
+      bottom: box.bottom,
+    };
+  }));
+
+  for (let leftIndex = 0; leftIndex < boxes.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < boxes.length; rightIndex += 1) {
+      const left = boxes[leftIndex];
+      const right = boxes[rightIndex];
+      const overlaps = !(
+        left.right <= right.left + 1 ||
+        right.right <= left.left + 1 ||
+        left.bottom <= right.top + 1 ||
+        right.bottom <= left.top + 1
+      );
+      if (overlaps) throw new Error(`Sobreposição entre "${left.label}" e "${right.label}"`);
+    }
   }
 }
 
@@ -96,8 +123,10 @@ await check("editar e salvar layout", async () => {
   await page.mouse.down();
   await page.mouse.move(handleBox.x + 180, handleBox.y + 90, { steps: 8 });
   await page.mouse.up();
+  await page.waitForTimeout(250);
   const after = await card.boundingBox();
   if (!after || (Math.abs(after.x - before.x) < 20 && Math.abs(after.y - before.y) < 20)) throw new Error("Drag-and-drop não alterou a posição");
+  await assertGridItemsDoNotOverlap();
   await page.getByRole("button", { name: "Salvar layout" }).click();
 });
 
@@ -107,7 +136,7 @@ await check("adicionar indicador", async () => {
   await page.screenshot({ path: `${outputDir}/builder-1366x768.png` });
   const divisor = page.locator(".formula-constant input");
   await divisor.fill("0");
-  await page.getByText("O divisor deve ser um número maior que zero.").waitFor();
+  await page.getByText("O divisor não pode ser zero.").waitFor();
   if (await page.getByRole("button", { name: "Adicionar ao rascunho" }).isEnabled()) throw new Error("Fórmula inválida não bloqueou o salvamento");
   await divisor.fill("30");
   await page.getByRole("button", { name: "Adicionar ao rascunho" }).click();

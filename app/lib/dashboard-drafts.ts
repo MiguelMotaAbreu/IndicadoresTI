@@ -1,5 +1,6 @@
 import type { DashboardKey } from "../mock-data";
 import type { MetricDefinitionDraft, MetricPreview } from "./metrics";
+import { resolveDashboardLayoutCollisions } from "./dashboard-layout-collisions.ts";
 
 export const DASHBOARD_DRAFT_SCHEMA_VERSION = 1;
 
@@ -163,7 +164,7 @@ export function parseDashboardDraft(
     return {
       schemaVersion: DASHBOARD_DRAFT_SCHEMA_VERSION,
       dashboardKey: expectedDashboardKey,
-      layout: parsedLayout,
+      layout: resolveDashboardLayoutCollisions(parsedLayout),
       customWidgets: validWidgets,
       savedAt: value.savedAt as string | null,
     };
