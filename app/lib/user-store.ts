@@ -118,6 +118,16 @@ export class UserStore {
     return row.total;
   }
 
+  list(): UserAccount[] {
+    const rows = this.database.prepare(`
+      SELECT ${USER_COLUMNS}
+      FROM users
+      ORDER BY is_active DESC, display_name COLLATE NOCASE, email COLLATE NOCASE
+    `).all() as StoredUserRow[];
+
+    return rows.map(mapAccount);
+  }
+
   findByEmail(email: string): UserAccount | null {
     const normalizedEmail = normalizeEmail(email);
     const row = this.database.prepare(`
@@ -196,6 +206,27 @@ export class UserStore {
       must_change_password: 0,
       updated_at: updatedAt,
     });
+  }
+
+  setActiveStatus(userId: string, isActive: boolean, now = new Date()): UserAccount {
+    const updatedAt = now.toISOString();
+    const result = this.database.prepare(`
+      UPDATE users
+      SET is_active = ?, deactivated_at = ?, updated_at = ?
+      WHERE id = ?
+      RETURNING ${USER_COLUMNS}
+    `).get(
+      isActive ? 1 : 0,
+      isActive ? null : updatedAt,
+      updatedAt,
+      userId,
+    ) as StoredUserRow | undefined;
+
+    if (!result) {
+      throw new UserStoreError("usuario_indisponivel", "A conta não está disponível.");
+    }
+
+    return mapAccount(result);
   }
 
   async createFirstAdministrator(input: Omit<CreateUserInput, "role">): Promise<UserAccount> {

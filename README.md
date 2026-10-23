@@ -60,6 +60,12 @@ O bootstrap falha de forma segura se já existir qualquer usuário. A senha é a
 
 No primeiro login, a conta é direcionada obrigatoriamente para `/trocar-senha`. A senha definitiva deve ter entre 12 e 128 caracteres e não pode repetir a senha temporária. Concluída a troca, todas as sessões anteriores são revogadas e uma nova sessão é criada.
 
+### Gestão de usuários
+
+Administradores podem abrir **Administração > Usuários** para listar contas, criar Administradores ou Analistas e desativar ou reativar acessos. A senha temporária é gerada no servidor e exibida uma única vez após a criação; somente o hash é persistido. A conta criada precisa definir uma nova senha no primeiro acesso.
+
+Desativar uma conta preserva sua identidade para referências históricas e revoga imediatamente todas as sessões abertas. A própria conta administrativa em uso não pode ser desativada, evitando o bloqueio acidental do único acesso em operação. A reativação mantém a senha que o usuário já havia definido.
+
 ## Verificações
 
 ```bash
@@ -79,3 +85,14 @@ npm run qa:auth
 ```
 
 O teste confirma bloqueio anônimo das APIs, erro genérico para credenciais inválidas, troca obrigatória, proteções do cookie, acesso autenticado e logout. Use sempre um banco descartável: o roteiro troca definitivamente a senha da conta informada.
+
+Com um administrador de QA já usando senha definitiva, execute também o fluxo de gestão de usuários:
+
+```powershell
+$env:QA_BASE_URL="http://localhost:3000"
+$env:QA_EMAIL="admin.qa@upa.local"
+$env:QA_PASSWORD="Senha definitiva QA 456"
+npm run qa:users
+```
+
+Esse roteiro cria um Analista exclusivo, confirma a troca obrigatória de senha, bloqueia o acesso administrativo, desativa a conta, verifica a revogação da sessão e reativa o acesso. Use um banco descartável, pois o usuário de QA permanece cadastrado após o teste.

@@ -123,3 +123,61 @@ test("troca a senha temporária sem permitir reutilização", async () => {
     database.close();
   }
 });
+
+test("lista contas sem dados de credencial e mantém uma ordem estável", async () => {
+  const database = new ApplicationDatabase(":memory:");
+  const store = new UserStore(database.connection);
+
+  try {
+    await store.create({
+      email: "zilda@upa.local",
+      displayName: "Zilda Analista",
+      role: "analista",
+      temporaryPassword: "Senha temporária 123",
+    });
+    await store.create({
+      email: "ana@upa.local",
+      displayName: "Ana Administradora",
+      role: "administrador",
+      temporaryPassword: "Senha temporária 456",
+    });
+
+    const accounts = store.list();
+    assert.deepEqual(accounts.map((account) => account.displayName), ["Ana Administradora", "Zilda Analista"]);
+    assert.equal(accounts.every((account) => !("passwordHash" in account)), true);
+  } finally {
+    database.close();
+  }
+});
+
+test("desativa e reativa a conta sem apagar identidade ou senha", async () => {
+  const database = new ApplicationDatabase(":memory:");
+  const store = new UserStore(database.connection);
+
+  try {
+    const analyst = await store.create({
+      email: "analista@upa.local",
+      displayName: "Analista TI",
+      role: "analista",
+      temporaryPassword: "Senha temporária 456",
+    });
+    const deactivatedAt = new Date("2026-10-23T12:00:00.000Z");
+
+    const inactive = store.setActiveStatus(analyst.id, false, deactivatedAt);
+    assert.equal(inactive.isActive, false);
+    assert.equal(inactive.deactivatedAt, deactivatedAt.toISOString());
+    assert.equal(await store.authenticate(analyst.email, "Senha temporária 456"), null);
+
+    const active = store.setActiveStatus(analyst.id, true, new Date("2026-10-23T13:00:00.000Z"));
+    assert.equal(active.isActive, true);
+    assert.equal(active.deactivatedAt, null);
+    assert.deepEqual(await store.authenticate(analyst.email, "Senha temporária 456"), active);
+
+    assert.throws(
+      () => store.setActiveStatus("usuario-inexistente", false),
+      (error) => error instanceof UserStoreError && error.code === "usuario_indisponivel",
+    );
+  } finally {
+    database.close();
+  }
+});

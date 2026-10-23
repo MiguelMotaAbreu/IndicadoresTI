@@ -58,6 +58,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { logout } from "./actions/auth";
+import { AdminUsers } from "./components/admin-users";
 import { Brand } from "./components/brand";
 import {
   auditEvents,
@@ -1296,7 +1297,7 @@ function DetailsDrawer({ crossFilter, onClose }: { crossFilter: string | null; o
   );
 }
 
-function Admin() {
+function Admin({ currentUser }: { currentUser: CurrentUser }) {
   const [section, setSection] = useState<AdminSection>("sync");
   const [syncState, setSyncState] = useState<"idle" | "running" | "done">("idle");
   const adminItems: Array<[AdminSection, typeof ActivityIcon, string]> = [
@@ -1334,7 +1335,7 @@ function Admin() {
               <div className="admin-panel"><h3>Atividade recente</h3>{auditEvents.map((event) => <div className="audit-row" key={event.title}><span className={cn("audit-dot", event.tone === "success" && "audit-dot--success")} /><span><strong>{event.title}</strong><small>{event.detail}</small></span><time>{event.time}</time></div>)}</div>
             </>
           )}
-          {section === "users" && <AdminPlaceholder icon={UsersThreeIcon} title="Usuários e permissões" description="Contas locais com senha temporária, perfis Administrador e Analista, e desativação preservando autoria." action="Novo usuário" />}
+          {section === "users" && <AdminUsers currentUserId={currentUser.id} />}
           {section === "mapping" && <AdminPlaceholder icon={DatabaseIcon} title="Mapeamentos do Notion" description="Associe propriedades lógicas, categorias derivadas e registros excluídos sem alterar a fonte operacional." action="Revisar mapeamentos" />}
           {section === "health" && <AdminPlaceholder icon={ActivityIcon} title="Saúde da instalação" description="SQLite, espaço em disco, serviço Docker, certificado local e conectividade com a API." action="Executar diagnóstico" />}
           {section === "audit" && <AdminPlaceholder icon={ListChecksIcon} title="Log de auditoria" description="Publicações, sincronizações, exportações, usuários e revelações de identidade registradas." action="Exportar auditoria" />}
@@ -1361,7 +1362,7 @@ export default function DashboardApp({ currentUser }: { currentUser: CurrentUser
     <AppShell view={view} selectedDashboard={selectedDashboard} currentUser={currentUser} onViewChange={setView} onDashboardChange={setSelectedDashboard}>
       {view === "catalog" && <Catalog onOpen={(key) => { setSelectedDashboard(key); setView("dashboard"); }} />}
       {view === "dashboard" && <Dashboard key={selectedDashboard} dashboardKey={selectedDashboard} currentUser={currentUser} onBack={() => setView("catalog")} />}
-      {view === "admin" && currentUser.role === "administrador" && <Admin />}
+      {view === "admin" && currentUser.role === "administrador" && <Admin currentUser={currentUser} />}
     </AppShell>
   );
 }
