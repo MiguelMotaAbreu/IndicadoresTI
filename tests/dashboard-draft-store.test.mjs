@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DashboardDraftStore } from "../app/lib/dashboard-draft-store.ts";
+import { ApplicationDatabase } from "../app/lib/database.ts";
 import {
   createDefaultDashboardDraft,
   parseDashboardDraft,
@@ -18,7 +19,8 @@ const defaultLayout = [
 test("persiste e atualiza um rascunho por usuário e painel", () => {
   const directory = mkdtempSync(join(tmpdir(), "pulseti-drafts-"));
   const databasePath = join(directory, "test.sqlite");
-  let store = new DashboardDraftStore(databasePath);
+  let database = new ApplicationDatabase(databasePath);
+  let store = new DashboardDraftStore(database.connection);
 
   try {
     assert.equal(store.findSerialized("admin", "overview"), null);
@@ -38,8 +40,9 @@ test("persiste e atualiza um rascunho por usuário e painel", () => {
     revised.layout[0].x = 4;
     revised.savedAt = "2026-10-22T16:00:00.000Z";
     store.save("admin", revised);
-    store.close();
-    store = new DashboardDraftStore(databasePath);
+    database.close();
+    database = new ApplicationDatabase(databasePath);
+    store = new DashboardDraftStore(database.connection);
 
     const storedRevised = store.findSerialized("admin", "overview");
     assert.ok(storedRevised);
@@ -47,7 +50,7 @@ test("persiste e atualiza um rascunho por usuário e painel", () => {
     assert.equal(store.findSerialized("analyst", "overview"), null);
     assert.equal(store.findSerialized("admin", "demand"), null);
   } finally {
-    store.close();
+    database.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });

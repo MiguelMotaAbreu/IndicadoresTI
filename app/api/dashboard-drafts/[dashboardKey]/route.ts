@@ -1,6 +1,7 @@
 import { dashboardLayouts } from "@/app/lib/dashboard-layouts";
-import { getDashboardDraftStore } from "@/app/lib/dashboard-draft-store";
+import { DashboardDraftStore } from "@/app/lib/dashboard-draft-store";
 import { parseDashboardDraft } from "@/app/lib/dashboard-drafts";
+import { getApplicationDatabase } from "@/app/lib/database";
 import type { DashboardKey } from "@/app/mock-data";
 
 const TEMPORARY_USER_ID = "admin";
@@ -14,6 +15,10 @@ function noStoreJson(payload: unknown, init?: ResponseInit): Response {
   const headers = new Headers(init?.headers);
   headers.set("Cache-Control", "no-store");
   return Response.json(payload, { ...init, headers });
+}
+
+function getDashboardDraftStore(): DashboardDraftStore {
+  return new DashboardDraftStore(getApplicationDatabase().connection);
 }
 
 export async function GET(
