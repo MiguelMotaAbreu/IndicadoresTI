@@ -59,6 +59,30 @@ const databaseMigrations: readonly DatabaseMigration[] = [
       ) STRICT;
     `,
   },
+  {
+    version: 3,
+    name: "create_user_sessions",
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE CHECK (length(token_hash) = 64),
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        idle_expires_at TEXT NOT NULL,
+        absolute_expires_at TEXT NOT NULL,
+        revoked_at TEXT,
+        CHECK (idle_expires_at <= absolute_expires_at)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS user_sessions_user_id_idx
+      ON user_sessions (user_id);
+
+      CREATE INDEX IF NOT EXISTS user_sessions_expiration_idx
+      ON user_sessions (idle_expires_at, absolute_expires_at)
+      WHERE revoked_at IS NULL;
+    `,
+  },
 ] as const;
 
 export const LATEST_DATABASE_VERSION = databaseMigrations.at(-1)?.version ?? 0;

@@ -23,6 +23,7 @@ test("aplica migrações pendentes uma única vez e cria a tabela de usuários",
       [
         { version: 1, name: "create_dashboard_drafts" },
         { version: 2, name: "create_users" },
+        { version: 3, name: "create_user_sessions" },
       ],
     );
 
@@ -46,9 +47,24 @@ test("aplica migrações pendentes uma única vez e cria a tabela de usuários",
       /CHECK constraint failed/,
     );
 
+    const sessionColumns = database.connection.prepare("PRAGMA table_info(user_sessions);").all();
+    assert.deepEqual(
+      sessionColumns.map((column) => column.name),
+      [
+        "id",
+        "token_hash",
+        "user_id",
+        "created_at",
+        "last_seen_at",
+        "idle_expires_at",
+        "absolute_expires_at",
+        "revoked_at",
+      ],
+    );
+
     database.close();
     database = new ApplicationDatabase(databasePath);
-    assert.equal(database.getAppliedMigrations().length, 2);
+    assert.equal(database.getAppliedMigrations().length, 3);
     assert.equal(database.connection.prepare("SELECT COUNT(*) AS total FROM users;").get().total, 1);
   } finally {
     database.close();
@@ -79,7 +95,7 @@ test("adota um banco legado sem apagar os rascunhos existentes", () => {
   const migratedDatabase = new ApplicationDatabase(databasePath);
   try {
     assert.equal(migratedDatabase.schemaVersion, LATEST_DATABASE_VERSION);
-    assert.equal(migratedDatabase.getAppliedMigrations().length, 2);
+    assert.equal(migratedDatabase.getAppliedMigrations().length, 3);
     assert.equal(
       migratedDatabase.connection.prepare("SELECT snapshot_json FROM dashboard_drafts WHERE user_id = ? AND dashboard_key = ?").get("admin", "overview").snapshot_json,
       "{\"legacy\":true}",

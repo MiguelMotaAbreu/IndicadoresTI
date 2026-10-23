@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import { hashPassword } from "./passwords.ts";
+import { hashPassword, verifyPassword } from "./passwords.ts";
 
 export type UserRole = "administrador" | "analista";
 
@@ -53,6 +53,11 @@ const USER_COLUMNS = `
   id, email, display_name, role, password_hash, must_change_password,
   is_active, created_at, updated_at, deactivated_at
 `;
+
+// Mantém aproximadamente o mesmo custo de scrypt quando o email não existe,
+// reduzindo a diferença de tempo que poderia revelar contas cadastradas.
+const DUMMY_PASSWORD_HASH =
+  "scrypt-v1$N=16384,r=8,p=1$rmX9xlPqKuEs39dE8-DszQ$c7h8rgedfB_ZAV953XkxRiIWGv8zp1FGzHqO7tVeIPqNF5h4W9GmeMXsAxoh1EWUDht6ZbxddR0isH5v453gxw";
 
 function normalizeEmail(email: string): string {
   const normalized = typeof email === "string" ? email.trim().toLocaleLowerCase("pt-BR") : "";
@@ -115,6 +120,26 @@ export class UserStore {
     `).get(normalizedEmail) as StoredUserRow | undefined;
 
     return row ? mapAccount(row) : null;
+  }
+
+  async authenticate(email: string, password: string): Promise<UserAccount | null> {
+    let row: StoredUserRow | undefined;
+
+    try {
+      const normalizedEmail = normalizeEmail(email);
+      row = this.database.prepare(`
+        SELECT ${USER_COLUMNS}
+        FROM users
+        WHERE email = ? COLLATE NOCASE
+      `).get(normalizedEmail) as StoredUserRow | undefined;
+    } catch (error) {
+      if (!(error instanceof UserStoreError) || error.code !== "email_invalido") throw error;
+    }
+
+    const passwordMatches = await verifyPassword(password, row?.password_hash ?? DUMMY_PASSWORD_HASH);
+    if (!row || !passwordMatches || row.is_active !== 1) return null;
+
+    return mapAccount(row);
   }
 
   async create(input: CreateUserInput): Promise<UserAccount> {

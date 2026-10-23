@@ -37,8 +37,11 @@ A versão atual cria:
 
 - `dashboard_drafts`: layouts e métricas personalizadas por usuário e painel.
 - `users`: estrutura para administradores e analistas, incluindo hash de senha, troca obrigatória e desativação de conta.
+- `user_sessions`: sessões opacas com expiração por inatividade e limite absoluto.
 
-A tela de login ainda não utiliza essa tabela. A primeira conta é criada uma única vez pelo comando de bootstrap abaixo; nenhuma conta ou senha padrão é incluída no código.
+A autenticação de credenciais e o ciclo de sessões já estão implementados no servidor. A tela de login e o cookie HTTP-only serão conectados em uma próxima fatia. A primeira conta é criada uma única vez pelo comando de bootstrap abaixo; nenhuma conta ou senha padrão é incluída no código.
+
+Cada sessão expira após 30 minutos sem atividade ou, no máximo, oito horas após sua criação. O banco guarda somente o hash SHA-256 do token de sessão; o token original existirá apenas no cookie seguro do navegador quando a interface de login for conectada.
 
 ### Primeiro administrador
 

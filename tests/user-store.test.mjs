@@ -68,3 +68,31 @@ test("cria contas normalizadas e traduz email duplicado para erro de domínio", 
     database.close();
   }
 });
+
+test("autentica somente credenciais corretas de contas ativas", async () => {
+  const database = new ApplicationDatabase(":memory:");
+  const store = new UserStore(database.connection);
+
+  try {
+    const analyst = await store.create({
+      email: "analista@upa.local",
+      displayName: "Analista TI",
+      role: "analista",
+      temporaryPassword: "Senha temporária 456",
+    });
+
+    assert.deepEqual(await store.authenticate(" ANALISTA@UPA.LOCAL ", "Senha temporária 456"), analyst);
+    assert.equal(await store.authenticate("analista@upa.local", "senha incorreta"), null);
+    assert.equal(await store.authenticate("inexistente@upa.local", "Senha temporária 456"), null);
+    assert.equal(await store.authenticate("email-inválido", "Senha temporária 456"), null);
+
+    database.connection.prepare(`
+      UPDATE users
+      SET is_active = 0, deactivated_at = ?
+      WHERE id = ?
+    `).run(new Date().toISOString(), analyst.id);
+    assert.equal(await store.authenticate("analista@upa.local", "Senha temporária 456"), null);
+  } finally {
+    database.close();
+  }
+});
