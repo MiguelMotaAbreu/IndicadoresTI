@@ -50,4 +50,25 @@ export class DashboardDraftStore {
     );
   }
 
+  adoptLegacyDrafts(userId: string): number {
+    if (userId === "admin") return 0;
+
+    const result = this.database.prepare(`
+      INSERT INTO dashboard_drafts (
+        user_id,
+        dashboard_key,
+        schema_version,
+        snapshot_json,
+        saved_at,
+        updated_at
+      )
+      SELECT ?, dashboard_key, schema_version, snapshot_json, saved_at, updated_at
+      FROM dashboard_drafts
+      WHERE user_id = 'admin'
+      ON CONFLICT(user_id, dashboard_key) DO NOTHING
+    `).run(userId);
+
+    return Number(result.changes);
+  }
+
 }

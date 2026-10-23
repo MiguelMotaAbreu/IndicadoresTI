@@ -39,9 +39,9 @@ A versão atual cria:
 - `users`: estrutura para administradores e analistas, incluindo hash de senha, troca obrigatória e desativação de conta.
 - `user_sessions`: sessões opacas com expiração por inatividade e limite absoluto.
 
-A autenticação de credenciais e o ciclo de sessões já estão implementados no servidor. A tela de login e o cookie HTTP-only serão conectados em uma próxima fatia. A primeira conta é criada uma única vez pelo comando de bootstrap abaixo; nenhuma conta ou senha padrão é incluída no código.
+A autenticação de credenciais e o ciclo de sessões estão conectados à interface. O dashboard e suas APIs exigem uma sessão válida, e a primeira conta é criada uma única vez pelo comando de bootstrap abaixo; nenhuma conta ou senha padrão é incluída no código.
 
-Cada sessão expira após 30 minutos sem atividade ou, no máximo, oito horas após sua criação. O banco guarda somente o hash SHA-256 do token de sessão; o token original existirá apenas no cookie seguro do navegador quando a interface de login for conectada.
+Cada sessão expira após 30 minutos sem atividade ou, no máximo, oito horas após sua criação. O banco guarda somente o hash SHA-256 do token de sessão; o token original existe apenas em um cookie `HttpOnly`, `SameSite=Strict` e `Secure` em produção.
 
 ### Primeiro administrador
 
@@ -58,6 +58,8 @@ O comando gera uma senha temporária criptograficamente aleatória, mostra-a uma
 
 O bootstrap falha de forma segura se já existir qualquer usuário. A senha é armazenada somente como um hash `scrypt` com salt individual; o valor original não é gravado no banco nem nos logs da aplicação.
 
+No primeiro login, a conta é direcionada obrigatoriamente para `/trocar-senha`. A senha definitiva deve ter entre 12 e 128 caracteres e não pode repetir a senha temporária. Concluída a troca, todas as sessões anteriores são revogadas e uma nova sessão é criada.
+
 ## Verificações
 
 ```bash
@@ -65,3 +67,15 @@ npm test
 npm run lint
 npm run build
 ```
+
+O fluxo completo de autenticação também possui um teste de navegador. Com o servidor iniciado sobre um banco isolado e um administrador temporário ainda não utilizado, informe as credenciais de QA e execute:
+
+```powershell
+$env:QA_BASE_URL="http://localhost:3000"
+$env:QA_EMAIL="admin.qa@upa.local"
+$env:QA_TEMPORARY_PASSWORD="Senha temporaria QA 123"
+$env:QA_NEW_PASSWORD="Senha definitiva QA 456"
+npm run qa:auth
+```
+
+O teste confirma bloqueio anônimo das APIs, erro genérico para credenciais inválidas, troca obrigatória, proteções do cookie, acesso autenticado e logout. Use sempre um banco descartável: o roteiro troca definitivamente a senha da conta informada.

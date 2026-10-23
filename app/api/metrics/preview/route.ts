@@ -4,8 +4,17 @@ import {
   previewMetricDefinition,
   validateMetricDefinition,
 } from "@/app/lib/metrics";
+import { getCurrentSession } from "@/app/lib/request-session";
 
 export async function POST(request: Request) {
+  const session = await getCurrentSession();
+  if (!session) {
+    return Response.json({ ok: false, error: "Sessão inválida ou expirada." }, { status: 401 });
+  }
+  if (session.user.mustChangePassword) {
+    return Response.json({ ok: false, error: "Troque a senha temporária antes de continuar." }, { status: 403 });
+  }
+
   let payload: unknown;
 
   try {

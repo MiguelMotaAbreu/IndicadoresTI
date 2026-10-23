@@ -54,3 +54,29 @@ test("persiste e atualiza um rascunho por usuário e painel", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("adota rascunhos do usuário provisório sem sobrescrever os atuais", () => {
+  const database = new ApplicationDatabase(":memory:");
+  const store = new DashboardDraftStore(database.connection);
+
+  try {
+    const legacyOverview = createDefaultDashboardDraft("overview", defaultLayout);
+    legacyOverview.savedAt = "2026-10-22T15:00:00.000Z";
+    store.save("admin", legacyOverview);
+
+    const currentOverview = structuredClone(legacyOverview);
+    currentOverview.savedAt = "2026-10-23T15:00:00.000Z";
+    store.save("user-1", currentOverview);
+
+    const legacyDemand = createDefaultDashboardDraft("demand", defaultLayout);
+    legacyDemand.savedAt = "2026-10-22T16:00:00.000Z";
+    store.save("admin", legacyDemand);
+
+    assert.equal(store.adoptLegacyDrafts("user-1"), 1);
+    assert.equal(JSON.parse(store.findSerialized("user-1", "overview")).savedAt, currentOverview.savedAt);
+    assert.equal(JSON.parse(store.findSerialized("user-1", "demand")).savedAt, legacyDemand.savedAt);
+    assert.equal(store.adoptLegacyDrafts("user-1"), 0);
+  } finally {
+    database.close();
+  }
+});

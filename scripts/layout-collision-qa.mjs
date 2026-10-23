@@ -1,4 +1,5 @@
 import { chromium } from "@playwright/test";
+import { authenticateQaUser } from "./qa-auth.mjs";
 
 const baseUrl = process.env.QA_BASE_URL ?? "http://127.0.0.1:3000";
 const browser = await chromium.launch({ channel: "msedge", headless: true });
@@ -36,7 +37,7 @@ function assertNoOverlaps(boxes) {
 
 try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Entrar na plataforma" }).click();
+  await authenticateQaUser(page);
   await page.getByRole("button", { name: /Visão geral/ }).first().click();
   await page.getByRole("heading", { name: "Visão geral", exact: true }).waitFor();
   await page.getByRole("button", { name: "Editar layout" }).click();
@@ -65,7 +66,7 @@ try {
   await page.getByRole("button", { name: "Salvar layout" }).click();
   await page.getByText("Layout e métricas salvos no servidor", { exact: true }).waitFor();
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Entrar na plataforma" }).click();
+  await authenticateQaUser(page);
   await page.getByRole("button", { name: /Visão geral/ }).first().click();
   await page.getByRole("heading", { name: "Visão geral", exact: true }).waitFor();
   await page.waitForTimeout(300);

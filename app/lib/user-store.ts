@@ -37,7 +37,14 @@ type StoredUserRow = {
   deactivated_at: string | null;
 };
 
-export type UserStoreErrorCode = "email_invalido" | "nome_invalido" | "perfil_invalido" | "email_duplicado" | "bootstrap_indisponivel";
+export type UserStoreErrorCode =
+  | "email_invalido"
+  | "nome_invalido"
+  | "perfil_invalido"
+  | "email_duplicado"
+  | "bootstrap_indisponivel"
+  | "usuario_indisponivel"
+  | "senha_reutilizada";
 
 export class UserStoreError extends Error {
   readonly code: UserStoreErrorCode;
@@ -122,6 +129,16 @@ export class UserStore {
     return row ? mapAccount(row) : null;
   }
 
+  findById(userId: string): UserAccount | null {
+    const row = this.database.prepare(`
+      SELECT ${USER_COLUMNS}
+      FROM users
+      WHERE id = ?
+    `).get(userId) as StoredUserRow | undefined;
+
+    return row ? mapAccount(row) : null;
+  }
+
   async authenticate(email: string, password: string): Promise<UserAccount | null> {
     let row: StoredUserRow | undefined;
 
@@ -145,6 +162,40 @@ export class UserStore {
   async create(input: CreateUserInput): Promise<UserAccount> {
     const prepared = await this.prepareUser(input);
     return this.insert(prepared);
+  }
+
+  async changePassword(userId: string, newPassword: string): Promise<UserAccount> {
+    const current = this.database.prepare(`
+      SELECT ${USER_COLUMNS}
+      FROM users
+      WHERE id = ? AND is_active = 1
+    `).get(userId) as StoredUserRow | undefined;
+
+    if (!current) {
+      throw new UserStoreError("usuario_indisponivel", "A conta não está disponível.");
+    }
+    if (await verifyPassword(newPassword, current.password_hash)) {
+      throw new UserStoreError("senha_reutilizada", "A nova senha deve ser diferente da senha temporária.");
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+    const updatedAt = new Date().toISOString();
+    const result = this.database.prepare(`
+      UPDATE users
+      SET password_hash = ?, must_change_password = 0, updated_at = ?
+      WHERE id = ? AND is_active = 1
+    `).run(passwordHash, updatedAt, userId);
+
+    if (result.changes !== 1) {
+      throw new UserStoreError("usuario_indisponivel", "A conta não está disponível.");
+    }
+
+    return mapAccount({
+      ...current,
+      password_hash: passwordHash,
+      must_change_password: 0,
+      updated_at: updatedAt,
+    });
   }
 
   async createFirstAdministrator(input: Omit<CreateUserInput, "role">): Promise<UserAccount> {

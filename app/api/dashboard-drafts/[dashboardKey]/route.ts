@@ -2,9 +2,9 @@ import { dashboardLayouts } from "@/app/lib/dashboard-layouts";
 import { DashboardDraftStore } from "@/app/lib/dashboard-draft-store";
 import { parseDashboardDraft } from "@/app/lib/dashboard-drafts";
 import { getApplicationDatabase } from "@/app/lib/database";
+import { getCurrentSession } from "@/app/lib/request-session";
 import type { DashboardKey } from "@/app/mock-data";
 
-const TEMPORARY_USER_ID = "admin";
 const MAX_SNAPSHOT_LENGTH = 1_000_000;
 
 function isDashboardKey(value: string): value is DashboardKey {
@@ -25,6 +25,12 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ dashboardKey: string }> },
 ) {
+  const session = await getCurrentSession();
+  if (!session) return noStoreJson({ ok: false, error: "Sessão inválida ou expirada." }, { status: 401 });
+  if (session.user.mustChangePassword) {
+    return noStoreJson({ ok: false, error: "Troque a senha temporária antes de continuar." }, { status: 403 });
+  }
+
   const { dashboardKey } = await params;
   if (!isDashboardKey(dashboardKey)) {
     return noStoreJson({ ok: false, error: "Painel desconhecido." }, { status: 404 });
@@ -32,7 +38,9 @@ export async function GET(
 
   let serialized: string | null;
   try {
-    serialized = getDashboardDraftStore().findSerialized(TEMPORARY_USER_ID, dashboardKey);
+    const store = getDashboardDraftStore();
+    if (session.user.role === "administrador") store.adoptLegacyDrafts(session.user.id);
+    serialized = store.findSerialized(session.user.id, dashboardKey);
   } catch {
     return noStoreJson({ ok: false, error: "Não foi possível consultar o armazenamento de rascunhos." }, { status: 503 });
   }
@@ -50,6 +58,12 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ dashboardKey: string }> },
 ) {
+  const session = await getCurrentSession();
+  if (!session) return noStoreJson({ ok: false, error: "Sessão inválida ou expirada." }, { status: 401 });
+  if (session.user.mustChangePassword) {
+    return noStoreJson({ ok: false, error: "Troque a senha temporária antes de continuar." }, { status: 403 });
+  }
+
   const { dashboardKey } = await params;
   if (!isDashboardKey(dashboardKey)) {
     return noStoreJson({ ok: false, error: "Painel desconhecido." }, { status: 404 });
@@ -80,7 +94,7 @@ export async function PUT(
 
   const savedDraft = { ...parsed, savedAt: new Date().toISOString() };
   try {
-    getDashboardDraftStore().save(TEMPORARY_USER_ID, savedDraft);
+    getDashboardDraftStore().save(session.user.id, savedDraft);
   } catch {
     return noStoreJson({ ok: false, error: "Não foi possível gravar o rascunho no armazenamento." }, { status: 503 });
   }

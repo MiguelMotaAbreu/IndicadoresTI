@@ -1,4 +1,5 @@
 import { chromium } from "@playwright/test";
+import { authenticateQaUser } from "./qa-auth.mjs";
 
 const baseUrl = process.env.QA_BASE_URL ?? "http://127.0.0.1:3000";
 const storageKey = "pulseti:v1:dashboard-draft:admin:overview";
@@ -26,7 +27,7 @@ const browser = await chromium.launch({ channel: "msedge", headless: true });
 const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
 
 async function loginAndOpenOverview() {
-  await page.getByRole("button", { name: "Entrar na plataforma" }).click();
+  await authenticateQaUser(page);
   await page.getByRole("heading", { name: "Catálogo de painéis" }).waitFor();
   await page.getByRole("button", { name: /Visão geral/ }).first().click();
   await page.getByRole("heading", { name: "Visão geral" }).waitFor();

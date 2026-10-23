@@ -96,3 +96,30 @@ test("autentica somente credenciais corretas de contas ativas", async () => {
     database.close();
   }
 });
+
+test("troca a senha temporária sem permitir reutilização", async () => {
+  const database = new ApplicationDatabase(":memory:");
+  const store = new UserStore(database.connection);
+
+  try {
+    const analyst = await store.create({
+      email: "analista@upa.local",
+      displayName: "Analista TI",
+      role: "analista",
+      temporaryPassword: "Senha temporária 456",
+    });
+
+    await assert.rejects(
+      store.changePassword(analyst.id, "Senha temporária 456"),
+      (error) => error instanceof UserStoreError && error.code === "senha_reutilizada",
+    );
+
+    const changed = await store.changePassword(analyst.id, "Nova senha definitiva 789");
+    assert.equal(changed.mustChangePassword, false);
+    assert.equal(await store.authenticate(analyst.email, "Senha temporária 456"), null);
+    assert.deepEqual(await store.authenticate(analyst.email, "Nova senha definitiva 789"), changed);
+    assert.deepEqual(store.findById(analyst.id), changed);
+  } finally {
+    database.close();
+  }
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactGridLayout, {
   type Layout,
   useContainerWidth,
@@ -37,16 +37,12 @@ import {
   DatabaseIcon,
   DotsSixVerticalIcon,
   DownloadSimpleIcon,
-  EnvelopeSimpleIcon,
-  EyeIcon,
-  EyeSlashIcon,
   FloppyDiskIcon,
   FunnelSimpleIcon,
   GearSixIcon,
   HouseIcon,
   InfoIcon,
   ListChecksIcon,
-  LockKeyIcon,
   MagnifyingGlassIcon,
   PencilSimpleIcon,
   PlusIcon,
@@ -61,6 +57,8 @@ import {
   WarningCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
+import { logout } from "./actions/auth";
+import { Brand } from "./components/brand";
 import {
   auditEvents,
   coverageData,
@@ -109,9 +107,17 @@ import {
 } from "./lib/dashboard-drafts";
 import { dashboardLayouts } from "./lib/dashboard-layouts";
 import { collisionSafeFreeCompactor, resolveDashboardLayoutCollisions } from "./lib/dashboard-layout-collisions";
+import type { UserRole } from "./lib/user-store";
 
-type View = "login" | "catalog" | "dashboard" | "admin";
+type View = "catalog" | "dashboard" | "admin";
 type AdminSection = "sync" | "users" | "mapping" | "health" | "audit";
+
+type CurrentUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+};
 
 type Filters = {
   period: string;
@@ -180,82 +186,25 @@ function cn(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function Brand({ dark = false }: { dark?: boolean }) {
-  return (
-    <div className={cn("brand", dark && "brand--dark")}>
-      <span className="brand__mark"><ActivityIcon size={19} weight="bold" /></span>
-      <span>
-        <strong>Pulse</strong><em>TI</em>
-      </span>
-    </div>
-  );
-}
-
-function Login({ onLogin }: { onLogin: () => void }) {
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
-    window.setTimeout(() => {
-      setLoading(false);
-      onLogin();
-    }, 650);
-  }
-
-  return (
-    <main className="login-page">
-      <div className="login-page__backdrop" aria-hidden="true" />
-      <section className="login-panel" aria-labelledby="login-title">
-        <div className="login-panel__brand"><Brand dark /></div>
-        <div className="login-panel__intro">
-          <p className="eyebrow eyebrow--light">Indicadores de TI · UPA Zona Leste</p>
-          <h1 id="login-title">Decisões melhores começam com dados confiáveis.</h1>
-          <p>Acesse os painéis analíticos da equipe de Tecnologia da Informação.</p>
-        </div>
-        <form className="login-form" onSubmit={submit}>
-          <label>
-            <span>Email</span>
-            <span className="field-with-icon">
-              <EnvelopeSimpleIcon size={18} />
-              <input type="email" defaultValue="analista@upa.santos.sp.gov.br" required />
-            </span>
-          </label>
-          <label>
-            <span>Senha</span>
-            <span className="field-with-icon">
-              <LockKeyIcon size={18} />
-              <input type={showPassword ? "text" : "password"} defaultValue="indicadores" required />
-              <button type="button" className="field-action" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}>
-                {showPassword ? <EyeSlashIcon size={18} /> : <EyeIcon size={18} />}
-              </button>
-            </span>
-          </label>
-          <div className="login-form__row">
-            <label className="checkbox"><input type="checkbox" /> <span>Lembrar neste computador</span></label>
-            <button type="button" className="link-button">Esqueci minha senha</button>
-          </div>
-          <button className="login-submit" type="submit" disabled={loading}>
-            {loading ? <span className="spinner" /> : "Entrar na plataforma"}
-          </button>
-        </form>
-        <p className="login-panel__foot"><ShieldCheckIcon size={16} /> Acesso restrito à rede interna · Sessão protegida</p>
-      </section>
-    </main>
-  );
-}
-
 type ShellProps = {
   view: View;
   selectedDashboard: DashboardKey;
+  currentUser: CurrentUser;
   onViewChange: (view: View) => void;
   onDashboardChange: (dashboard: DashboardKey) => void;
-  onLogout: () => void;
   children: React.ReactNode;
 };
 
-function AppShell({ view, selectedDashboard, onViewChange, onDashboardChange, onLogout, children }: ShellProps) {
+function userInitials(displayName: string): string {
+  return displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase("pt-BR"))
+    .join("");
+}
+
+function AppShell({ view, selectedDashboard, currentUser, onViewChange, onDashboardChange, children }: ShellProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -285,10 +234,14 @@ function AppShell({ view, selectedDashboard, onViewChange, onDashboardChange, on
                 </button>
               );
             })}
-            <p className="nav-label nav-label--spaced">Gestão</p>
-            <button className={cn("nav-item", view === "admin" && "is-active")} onClick={() => onViewChange("admin")}>
-              <GearSixIcon size={18} /> <span>Administração</span>
-            </button>
+            {currentUser.role === "administrador" && (
+              <>
+                <p className="nav-label nav-label--spaced">Gestão</p>
+                <button className={cn("nav-item", view === "admin" && "is-active")} onClick={() => onViewChange("admin")}>
+                  <GearSixIcon size={18} /> <span>Administração</span>
+                </button>
+              </>
+            )}
           </nav>
           <div className="sidebar__status">
             <span className="status-orb"><CloudCheckIcon size={16} weight="fill" /></span>
@@ -318,14 +271,16 @@ function AppShell({ view, selectedDashboard, onViewChange, onDashboardChange, on
               </div>
               <div className="popover-wrap">
                 <button className="profile-button" onClick={() => setProfileOpen((value) => !value)}>
-                  <span className="avatar">MM</span>
-                  <span><strong>Miguel Mota</strong><small>Administrador</small></span>
+                  <span className="avatar">{userInitials(currentUser.displayName)}</span>
+                  <span><strong>{currentUser.displayName}</strong><small>{currentUser.role === "administrador" ? "Administrador" : "Analista"}</small></span>
                   <CaretDownIcon size={14} />
                 </button>
                 {profileOpen && (
                   <div className="popover profile-popover">
                     <button><UserCircleIcon size={17} /> Minha conta</button>
-                    <button onClick={onLogout}><SignOutIcon size={17} /> Encerrar sessão</button>
+                    <form action={logout}>
+                      <button type="submit"><SignOutIcon size={17} /> Encerrar sessão</button>
+                    </form>
                   </div>
                 )}
               </div>
@@ -772,7 +727,7 @@ function normalizeApiDraft(payload: DashboardDraftApiResponse, dashboardKey: Das
   return parseDashboardDraft(serializeDashboardDraft(payload.draft), dashboardKey, dashboardLayouts[dashboardKey]);
 }
 
-function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBack: () => void }) {
+function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: DashboardKey; currentUser: CurrentUser; onBack: () => void }) {
   const theme = dashboardThemes.find((item) => item.key === dashboardKey) ?? dashboardThemes[0];
   const metrics = themeMetrics[dashboardKey];
   const [editing, setEditing] = useState(false);
@@ -811,10 +766,20 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
         if (payload.draft && !saved) throw new Error("O servidor retornou um rascunho incompatível.");
 
         if (!saved) {
-          const legacyKey = dashboardDraftStorageKey(dashboardKey);
+          const userStorageKey = dashboardDraftStorageKey(dashboardKey, currentUser.id);
+          const legacyStorageKeys = currentUser.role === "administrador"
+            ? [userStorageKey, dashboardDraftStorageKey(dashboardKey)]
+            : [userStorageKey];
           let legacyRaw: string | null = null;
+          let migratedStorageKey: string | null = null;
           try {
-            legacyRaw = window.localStorage.getItem(legacyKey);
+            for (const storageKey of legacyStorageKeys) {
+              legacyRaw = window.localStorage.getItem(storageKey);
+              if (legacyRaw) {
+                migratedStorageKey = storageKey;
+                break;
+              }
+            }
           } catch {
             // O servidor continua sendo a fonte principal mesmo sem acesso ao armazenamento legado.
           }
@@ -832,7 +797,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
             if (!migrationResponse.ok || !migrationPayload.ok || !saved) {
               throw new Error(migrationPayload.error ?? "Não foi possível migrar o rascunho local.");
             }
-            window.localStorage.removeItem(legacyKey);
+            if (migratedStorageKey) window.localStorage.removeItem(migratedStorageKey);
             if (active) {
               setToast("Rascunho local migrado para o servidor");
               toastTimer = window.setTimeout(() => setToast(null), 2600);
@@ -859,7 +824,7 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
       controller.abort();
       if (toastTimer !== undefined) window.clearTimeout(toastTimer);
     };
-  }, [dashboardKey]);
+  }, [currentUser.id, currentUser.role, dashboardKey]);
 
   function setLayout(updater: Layout | ((current: Layout) => Layout)) {
     setDraftEditor((state) => {
@@ -915,7 +880,10 @@ function Dashboard({ dashboardKey, onBack }: { dashboardKey: DashboardKey; onBac
       const saved = normalizeApiDraft(payload, dashboardKey);
       if (!response.ok || !payload.ok || !saved) throw new Error(payload.error ?? "rascunho_não_salvo");
 
-      window.localStorage.removeItem(dashboardDraftStorageKey(dashboardKey));
+      window.localStorage.removeItem(dashboardDraftStorageKey(dashboardKey, currentUser.id));
+      if (currentUser.role === "administrador") {
+        window.localStorage.removeItem(dashboardDraftStorageKey(dashboardKey));
+      }
       setDraftEditor({ current: cloneDashboardDraft(saved), saved });
       setDraftPersistenceStatus("ready");
       setEditing(false);
@@ -1385,17 +1353,15 @@ function AdminPlaceholder({ icon: Icon, title, description, action }: { icon: ty
   );
 }
 
-export default function DashboardApp() {
-  const [view, setView] = useState<View>("login");
+export default function DashboardApp({ currentUser }: { currentUser: CurrentUser }) {
+  const [view, setView] = useState<View>("catalog");
   const [selectedDashboard, setSelectedDashboard] = useState<DashboardKey>("overview");
 
-  if (view === "login") return <Login onLogin={() => setView("catalog")} />;
-
   return (
-    <AppShell view={view} selectedDashboard={selectedDashboard} onViewChange={setView} onDashboardChange={setSelectedDashboard} onLogout={() => setView("login")}>
+    <AppShell view={view} selectedDashboard={selectedDashboard} currentUser={currentUser} onViewChange={setView} onDashboardChange={setSelectedDashboard}>
       {view === "catalog" && <Catalog onOpen={(key) => { setSelectedDashboard(key); setView("dashboard"); }} />}
-      {view === "dashboard" && <Dashboard key={selectedDashboard} dashboardKey={selectedDashboard} onBack={() => setView("catalog")} />}
-      {view === "admin" && <Admin />}
+      {view === "dashboard" && <Dashboard key={selectedDashboard} dashboardKey={selectedDashboard} currentUser={currentUser} onBack={() => setView("catalog")} />}
+      {view === "admin" && currentUser.role === "administrador" && <Admin />}
     </AppShell>
   );
 }

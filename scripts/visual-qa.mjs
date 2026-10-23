@@ -1,5 +1,6 @@
 import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
+import { authenticateQaUser } from "./qa-auth.mjs";
 
 const outputDir = process.env.QA_ARTIFACT_DIR ?? "qa-artifacts";
 const baseUrl = process.env.QA_BASE_URL ?? "http://127.0.0.1:3000";
@@ -19,6 +20,10 @@ page.on("console", (message) => {
 page.on("pageerror", (error) => pageErrors.push(error.message));
 
 const checks = [];
+async function capture(fileName) {
+  await page.screenshot({ path: `${outputDir}/${fileName}`, caret: "initial" });
+}
+
 async function check(name, action) {
   try {
     await action();
@@ -56,22 +61,22 @@ async function assertGridItemsDoNotOverlap() {
 }
 
 await page.goto(baseUrl, { waitUntil: "networkidle" });
-await page.screenshot({ path: `${outputDir}/login-1366x768.png` });
+await capture("login-1366x768.png");
 
 await check("login visível", async () => {
   await page.getByRole("heading", { name: /Decisões melhores/ }).waitFor();
-  await page.getByRole("button", { name: "Entrar na plataforma" }).click();
+  await authenticateQaUser(page);
   await page.getByRole("heading", { name: "Catálogo de painéis" }).waitFor();
 });
 
-await page.screenshot({ path: `${outputDir}/catalog-1366x768.png` });
+await capture("catalog-1366x768.png");
 
 await check("abrir painel Visão geral", async () => {
   await page.getByRole("button", { name: /Visão geral/ }).first().click();
   await page.getByRole("heading", { name: "Visão geral" }).waitFor();
 });
 
-await page.screenshot({ path: `${outputDir}/dashboard-1366x768.png` });
+await capture("dashboard-1366x768.png");
 
 await check("painéis com composições próprias", async () => {
   const panels = [
@@ -86,7 +91,7 @@ await check("painéis com composições próprias", async () => {
     await page.getByRole("heading", { name: heading, exact: true }).waitFor();
     await page.getByText(widget, { exact: true }).waitFor();
     await page.waitForTimeout(250);
-    await page.screenshot({ path: `${outputDir}/dashboard-${file}-1366x768.png` });
+    await capture(`dashboard-${file}-1366x768.png`);
   }
   await page.getByRole("button", { name: "Visão geral", exact: true }).click();
   await page.getByRole("heading", { name: "Visão geral", exact: true }).waitFor();
@@ -94,7 +99,7 @@ await check("painéis com composições próprias", async () => {
 
 await check("aplicar filtros", async () => {
   await page.getByRole("button", { name: /Filtros/ }).click();
-  await page.screenshot({ path: `${outputDir}/filters-1366x768.png` });
+  await capture("filters-1366x768.png");
   await page.locator(".filter-panel label").filter({ hasText: "Período" }).locator("select").selectOption("Últimos 30 dias");
   await page.locator(".filter-panel label").filter({ hasText: "Setor" }).locator("select").selectOption("Farmácia");
   await page.getByRole("button", { name: "Aplicar filtros" }).click();
@@ -104,14 +109,14 @@ await check("aplicar filtros", async () => {
 await check("abrir e fechar detalhamento", async () => {
   await page.locator(".metric-card").first().click();
   await page.getByRole("heading", { name: "Chamados do recorte" }).waitFor();
-  await page.screenshot({ path: `${outputDir}/details-1366x768.png` });
+  await capture("details-1366x768.png");
   await page.getByRole("button", { name: "Fechar" }).click();
 });
 
 await check("editar e salvar layout", async () => {
   await page.getByRole("button", { name: "Editar layout" }).click();
   await page.getByText("Modo de edição ativo.").waitFor();
-  await page.screenshot({ path: `${outputDir}/layout-edit-1366x768.png` });
+  await capture("layout-edit-1366x768.png");
   const handles = await page.locator(".react-resizable-handle").count();
   if (handles < 8) throw new Error("Redimensionamento em oito direções não foi ativado");
   const card = page.locator(".react-grid-item").first();
@@ -133,7 +138,7 @@ await check("editar e salvar layout", async () => {
 await check("adicionar indicador", async () => {
   await page.getByRole("button", { name: "Indicador", exact: true }).click();
   await page.getByRole("heading", { name: "Nova métrica calculada" }).waitFor();
-  await page.screenshot({ path: `${outputDir}/builder-1366x768.png` });
+  await capture("builder-1366x768.png");
   const divisor = page.locator(".formula-constant input");
   await divisor.fill("0");
   await page.getByText("O divisor não pode ser zero.").waitFor();
@@ -150,10 +155,10 @@ await check("administração e sincronização", async () => {
   await page.getByText("Sincronização concluída").first().waitFor({ timeout: 5000 });
 });
 
-await page.screenshot({ path: `${outputDir}/admin-1366x768.png` });
+await capture("admin-1366x768.png");
 
 await check("logout", async () => {
-  await page.getByRole("button", { name: /Miguel Mota/ }).click();
+  await page.locator(".profile-button").click();
   await page.getByRole("button", { name: "Encerrar sessão" }).click();
   await page.getByRole("heading", { name: /Decisões melhores/ }).waitFor();
 });
