@@ -25,6 +25,7 @@ test("aplica migrações pendentes uma única vez e cria a tabela de usuários",
         { version: 2, name: "create_users" },
         { version: 3, name: "create_user_sessions" },
         { version: 4, name: "create_audit_events" },
+        { version: 5, name: "create_sync_state" },
       ],
     );
 
@@ -82,9 +83,34 @@ test("aplica migrações pendentes uma única vez e cria a tabela de usuários",
       ],
     );
 
+    const syncRunColumns = database.connection.prepare("PRAGMA table_info(sync_runs);").all();
+    assert.deepEqual(
+      syncRunColumns.map((column) => column.name),
+      [
+        "id",
+        "requested_by_user_id",
+        "requested_by_name",
+        "status",
+        "started_at",
+        "finished_at",
+        "snapshot_id",
+        "ticket_count",
+        "event_count",
+        "warning_count",
+        "error_code",
+        "error_message",
+      ],
+    );
+
+    const snapshotColumns = database.connection.prepare("PRAGMA table_info(analytical_snapshots);").all();
+    assert.deepEqual(
+      snapshotColumns.map((column) => column.name),
+      ["id", "status", "ticket_count", "event_count", "warning_count", "created_at", "published_at"],
+    );
+
     database.close();
     database = new ApplicationDatabase(databasePath);
-    assert.equal(database.getAppliedMigrations().length, 4);
+    assert.equal(database.getAppliedMigrations().length, 5);
     assert.equal(database.connection.prepare("SELECT COUNT(*) AS total FROM users;").get().total, 1);
   } finally {
     database.close();
@@ -115,7 +141,7 @@ test("adota um banco legado sem apagar os rascunhos existentes", () => {
   const migratedDatabase = new ApplicationDatabase(databasePath);
   try {
     assert.equal(migratedDatabase.schemaVersion, LATEST_DATABASE_VERSION);
-    assert.equal(migratedDatabase.getAppliedMigrations().length, 4);
+    assert.equal(migratedDatabase.getAppliedMigrations().length, 5);
     assert.equal(
       migratedDatabase.connection.prepare("SELECT snapshot_json FROM dashboard_drafts WHERE user_id = ? AND dashboard_key = ?").get("admin", "overview").snapshot_json,
       "{\"legacy\":true}",

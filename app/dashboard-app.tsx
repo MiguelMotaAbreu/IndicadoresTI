@@ -59,10 +59,10 @@ import {
 } from "@phosphor-icons/react";
 import { logout } from "./actions/auth";
 import { AdminAudit } from "./components/admin-audit";
+import { AdminSync } from "./components/admin-sync";
 import { AdminUsers } from "./components/admin-users";
 import { Brand } from "./components/brand";
 import {
-  auditEvents,
   coverageData,
   dataFields,
   dashboardThemes,
@@ -1300,7 +1300,6 @@ function DetailsDrawer({ crossFilter, onClose }: { crossFilter: string | null; o
 
 function Admin({ currentUser }: { currentUser: CurrentUser }) {
   const [section, setSection] = useState<AdminSection>("sync");
-  const [syncState, setSyncState] = useState<"idle" | "running" | "done">("idle");
   const adminItems: Array<[AdminSection, typeof ActivityIcon, string]> = [
     ["sync", ArrowsClockwiseIcon, "Sincronização"],
     ["users", UsersThreeIcon, "Usuários"],
@@ -1308,11 +1307,6 @@ function Admin({ currentUser }: { currentUser: CurrentUser }) {
     ["health", ActivityIcon, "Saúde do sistema"],
     ["audit", ListChecksIcon, "Auditoria"],
   ];
-  function sync() {
-    setSyncState("running");
-    window.setTimeout(() => setSyncState("done"), 1700);
-  }
-
   return (
     <div className="page page--admin">
       <div className="page-heading"><div><p className="eyebrow">Gestão da plataforma</p><h1>Administração</h1><p>Controle acesso, dados, catálogo e saúde da instalação local.</p></div><span className="admin-badge"><ShieldCheckIcon size={16} />Área de administrador</span></div>
@@ -1323,19 +1317,7 @@ function Admin({ currentUser }: { currentUser: CurrentUser }) {
           })}
         </nav>
         <section className="admin-content">
-          {section === "sync" && (
-            <>
-              <div className="admin-section-heading"><div><h2>Sincronização com o Notion</h2><p>A plataforma mantém a última carga íntegra até a próxima atualização ser validada.</p></div><button className="button button--primary" disabled={syncState === "running"} onClick={sync}><ArrowsClockwiseIcon className={syncState === "running" ? "spin" : ""} size={17} />{syncState === "running" ? "Sincronizando..." : "Sincronizar agora"}</button></div>
-              <div className="sync-overview">
-                <span><CloudCheckIcon size={22} weight="fill" /><b>Última carga íntegra</b><strong>20 out 2026 · 14:32</strong><small>518 chamados · 72 eventos</small></span>
-                <span><DatabaseIcon size={22} /><b>Fonte</b><strong>Notion · Somente leitura</strong><small>2 bases mapeadas</small></span>
-                <span><ActivityIcon size={22} /><b>Integridade</b><strong>Sem bloqueios</strong><small>12 alertas não críticos</small></span>
-              </div>
-              {syncState === "running" && <div className="sync-progress"><span><b>Validando propriedades e relações...</b><small>A carga anterior continua disponível.</small></span><i><b /></i></div>}
-              {syncState === "done" && <div className="sync-success"><CheckCircleIcon size={20} weight="fill" /><span><b>Sincronização concluída</b><small>A nova carga íntegra foi publicada com sucesso.</small></span></div>}
-              <div className="admin-panel"><h3>Atividade recente</h3>{auditEvents.map((event) => <div className="audit-row" key={event.title}><span className={cn("audit-dot", event.tone === "success" && "audit-dot--success")} /><span><strong>{event.title}</strong><small>{event.detail}</small></span><time>{event.time}</time></div>)}</div>
-            </>
-          )}
+          {section === "sync" && <AdminSync />}
           {section === "users" && <AdminUsers currentUserId={currentUser.id} />}
           {section === "mapping" && <AdminPlaceholder icon={DatabaseIcon} title="Mapeamentos do Notion" description="Associe propriedades lógicas, categorias derivadas e registros excluídos sem alterar a fonte operacional." action="Revisar mapeamentos" />}
           {section === "health" && <AdminPlaceholder icon={ActivityIcon} title="Saúde da instalação" description="SQLite, espaço em disco, serviço Docker, certificado local e conectividade com a API." action="Executar diagnóstico" />}

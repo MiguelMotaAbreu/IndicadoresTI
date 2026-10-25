@@ -39,6 +39,8 @@ A versão atual cria:
 - `users`: estrutura para administradores e analistas, incluindo hash de senha, troca obrigatória e desativação de conta.
 - `user_sessions`: sessões opacas com expiração por inatividade e limite absoluto.
 - `audit_events`: registro append-only dos eventos de autenticação e gestão de usuários.
+- `sync_runs`: histórico e estado das execuções de sincronização.
+- `analytical_snapshots`: metadados das cargas analíticas publicadas e substituídas.
 
 A autenticação de credenciais e o ciclo de sessões estão conectados à interface. O dashboard e suas APIs exigem uma sessão válida, e a primeira conta é criada uma única vez pelo comando de bootstrap abaixo; nenhuma conta ou senha padrão é incluída no código.
 
@@ -72,6 +74,22 @@ Desativar uma conta preserva sua identidade para referências históricas e revo
 Administradores podem consultar em **Administração > Auditoria** os 200 eventos mais recentes de login, logout, troca de senha e criação, desativação ou reativação de usuários. A tela permite pesquisar e filtrar por categoria e resultado.
 
 Os eventos guardam um retrato do ator, alvo, resultado, data e resumo da ação. Senhas, hashes e tokens de sessão nunca fazem parte do registro. Alterações de usuários e seus eventos são confirmados na mesma transação SQLite.
+
+### Fundação da sincronização
+
+Administradores podem consultar em **Administração > Sincronização** o estado real da configuração, a última carga íntegra e o histórico de execuções. A simulação visual anterior foi removida: enquanto o conector não estiver disponível, a aplicação informa claramente a pendência e não apresenta uma sincronização fictícia como concluída.
+
+O ciclo persistente de uma carga possui os estados `running`, `succeeded` e `failed`. Somente uma execução pode permanecer ativa, e a publicação de um novo snapshot acontece em uma única transação: a carga anterior só é substituída quando a nova carga foi completamente validada. Falhas preservam o último snapshot publicado.
+
+As credenciais e IDs futuros serão lidos apenas no servidor pelas variáveis abaixo; a API administrativa expõe somente se cada requisito está configurado, nunca os valores:
+
+```powershell
+$env:PULSETI_NOTION_TOKEN="token-da-integracao"
+$env:PULSETI_NOTION_TICKETS_DATABASE_ID="id-da-base-de-chamados"
+$env:PULSETI_NOTION_HISTORY_DATABASE_ID="id-da-base-de-historico"
+```
+
+Esta fatia ainda não consulta a API do Notion. A execução manual permanecerá bloqueada até que o conector e o mapeamento das propriedades sejam implementados.
 
 ## Verificações
 

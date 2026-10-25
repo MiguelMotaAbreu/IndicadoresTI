@@ -109,6 +109,52 @@ const databaseMigrations: readonly DatabaseMigration[] = [
       ON audit_events (action, occurred_at DESC);
     `,
   },
+  {
+    version: 5,
+    name: "create_sync_state",
+    sql: `
+      CREATE TABLE IF NOT EXISTS analytical_snapshots (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL CHECK (status IN ('published', 'superseded')),
+        ticket_count INTEGER NOT NULL CHECK (ticket_count >= 0),
+        event_count INTEGER NOT NULL CHECK (event_count >= 0),
+        warning_count INTEGER NOT NULL CHECK (warning_count >= 0),
+        created_at TEXT NOT NULL,
+        published_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS analytical_snapshots_one_published_idx
+      ON analytical_snapshots (status)
+      WHERE status = 'published';
+
+      CREATE TABLE IF NOT EXISTS sync_runs (
+        id TEXT PRIMARY KEY,
+        requested_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        requested_by_name TEXT NOT NULL CHECK (length(trim(requested_by_name)) BETWEEN 2 AND 100),
+        status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        snapshot_id TEXT REFERENCES analytical_snapshots(id) ON DELETE SET NULL,
+        ticket_count INTEGER CHECK (ticket_count IS NULL OR ticket_count >= 0),
+        event_count INTEGER CHECK (event_count IS NULL OR event_count >= 0),
+        warning_count INTEGER CHECK (warning_count IS NULL OR warning_count >= 0),
+        error_code TEXT CHECK (error_code IS NULL OR length(error_code) BETWEEN 3 AND 80),
+        error_message TEXT CHECK (error_message IS NULL OR length(error_message) BETWEEN 3 AND 500),
+        CHECK (
+          (status = 'running' AND finished_at IS NULL AND snapshot_id IS NULL AND error_code IS NULL AND error_message IS NULL)
+          OR (status = 'succeeded' AND finished_at IS NOT NULL AND snapshot_id IS NOT NULL AND error_code IS NULL AND error_message IS NULL)
+          OR (status = 'failed' AND finished_at IS NOT NULL AND snapshot_id IS NULL AND error_code IS NOT NULL AND error_message IS NOT NULL)
+        )
+      ) STRICT;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS sync_runs_one_running_idx
+      ON sync_runs ((1))
+      WHERE status = 'running';
+
+      CREATE INDEX IF NOT EXISTS sync_runs_started_at_idx
+      ON sync_runs (started_at DESC);
+    `,
+  },
 ] as const;
 
 export const LATEST_DATABASE_VERSION = databaseMigrations.at(-1)?.version ?? 0;

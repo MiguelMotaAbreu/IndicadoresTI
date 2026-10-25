@@ -230,6 +230,8 @@ async function runAuditFlow(baseUrl) {
   try {
     const anonymousAudit = await anonymousContext.request.get(`${baseUrl}/api/admin/audit`);
     if (anonymousAudit.status() !== 401) throw new Error("A auditoria aceitou uma consulta anônima.");
+    const anonymousSync = await anonymousContext.request.get(`${baseUrl}/api/admin/sync`);
+    if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
 
     const failedLoginPage = await anonymousContext.newPage();
     await login(failedLoginPage, administratorEmail, "senha propositalmente incorreta");
@@ -260,6 +262,8 @@ async function runAuditFlow(baseUrl) {
       await analystPage.waitForURL(/\/trocar-senha$/);
       const forbiddenAudit = await analystContext.request.get(`${baseUrl}/api/admin/audit`);
       if (forbiddenAudit.status() !== 403) throw new Error("Uma conta Analista consultou a auditoria.");
+      const forbiddenSync = await analystContext.request.get(`${baseUrl}/api/admin/sync`);
+      if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
     } finally {
       await analystContext.close();
     }
@@ -276,7 +280,21 @@ async function runAuditFlow(baseUrl) {
       throw new Error("A auditoria expôs uma credencial ou token.");
     }
 
+    const syncResponse = await administratorContext.request.get(`${baseUrl}/api/admin/sync`);
+    if (!syncResponse.ok()) throw new Error("A conta Administrador não conseguiu consultar as sincronizações.");
+    const syncPayload = await syncResponse.json();
+    if (syncPayload.latestSnapshot !== null || syncPayload.capabilities?.canStart !== false) {
+      throw new Error("O estado inicial da sincronização não corresponde ao banco descartável.");
+    }
+    const serializedSync = JSON.stringify(syncPayload);
+    if (serializedSync.includes("PULSETI_NOTION_TOKEN") || serializedSync.includes("secret_")) {
+      throw new Error("O estado das sincronizações expôs uma credencial do Notion.");
+    }
+
     await administratorPage.getByRole("button", { name: "Administração" }).click();
+    await administratorPage.getByRole("heading", { name: "Sincronização com o Notion" }).waitFor();
+    await administratorPage.getByText("Nenhuma carga publicada", { exact: true }).waitFor();
+    await administratorPage.getByText("Execução ainda indisponível", { exact: true }).waitFor();
     await administratorPage.getByRole("button", { name: "Auditoria" }).click();
     await administratorPage.getByRole("heading", { name: "Log de auditoria" }).waitFor();
     await administratorPage.getByText("Usuário criado", { exact: true }).first().waitFor();
@@ -285,7 +303,7 @@ async function runAuditFlow(baseUrl) {
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: registro, sigilo, autorização e filtros da auditoria funcionam.\n");
+    process.stdout.write("QA concluído: auditoria e estado administrativo das sincronizações funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();
