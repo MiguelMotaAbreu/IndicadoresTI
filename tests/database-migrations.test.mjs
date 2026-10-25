@@ -26,6 +26,8 @@ test("aplica migrações pendentes uma única vez e cria a tabela de usuários",
         { version: 3, name: "create_user_sessions" },
         { version: 4, name: "create_audit_events" },
         { version: 5, name: "create_sync_state" },
+        { version: 6, name: "create_notion_property_mappings" },
+        { version: 7, name: "remove_legacy_ticket_title_mapping" },
       ],
     );
 
@@ -108,9 +110,15 @@ test("aplica migrações pendentes uma única vez e cria a tabela de usuários",
       ["id", "status", "ticket_count", "event_count", "warning_count", "created_at", "published_at"],
     );
 
+    const mappingColumns = database.connection.prepare("PRAGMA table_info(notion_property_mappings);").all();
+    assert.deepEqual(
+      mappingColumns.map((column) => column.name),
+      ["field_key", "source_key", "property_id", "property_name", "property_type", "updated_by_user_id", "updated_by_name", "updated_at"],
+    );
+
     database.close();
     database = new ApplicationDatabase(databasePath);
-    assert.equal(database.getAppliedMigrations().length, 5);
+    assert.equal(database.getAppliedMigrations().length, 7);
     assert.equal(database.connection.prepare("SELECT COUNT(*) AS total FROM users;").get().total, 1);
   } finally {
     database.close();
@@ -141,7 +149,7 @@ test("adota um banco legado sem apagar os rascunhos existentes", () => {
   const migratedDatabase = new ApplicationDatabase(databasePath);
   try {
     assert.equal(migratedDatabase.schemaVersion, LATEST_DATABASE_VERSION);
-    assert.equal(migratedDatabase.getAppliedMigrations().length, 5);
+    assert.equal(migratedDatabase.getAppliedMigrations().length, 7);
     assert.equal(
       migratedDatabase.connection.prepare("SELECT snapshot_json FROM dashboard_drafts WHERE user_id = ? AND dashboard_key = ?").get("admin", "overview").snapshot_json,
       "{\"legacy\":true}",

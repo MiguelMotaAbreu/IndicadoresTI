@@ -43,6 +43,7 @@ A versão atual cria:
 - `audit_events`: registro append-only dos eventos de autenticação e gestão de usuários.
 - `sync_runs`: histórico e estado das execuções de sincronização.
 - `analytical_snapshots`: metadados das cargas analíticas publicadas e substituídas.
+- `notion_property_mappings`: associação validada entre o esquema do Notion e o contrato analítico interno.
 
 A autenticação de credenciais e o ciclo de sessões estão conectados à interface. O dashboard e suas APIs exigem uma sessão válida, e a primeira conta é criada uma única vez pelo comando de bootstrap abaixo; nenhuma conta ou senha padrão é incluída no código.
 
@@ -94,6 +95,16 @@ $env:PULSETI_NOTION_HISTORY_DATABASE_ID="id-da-base-de-historico"
 Com as três variáveis configuradas, o botão **Testar conexão** faz consultas somente leitura usando a versão `2026-03-11` da API do Notion. O diagnóstico verifica o acesso às duas bases, resolve a fonte de dados de cada base e apresenta apenas nome, quantidade e tipos das propriedades. Tokens, IDs internos e mensagens brutas do serviço não são devolvidos ao navegador nem registrados na auditoria.
 
 Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explícita, pois escolher silenciosamente uma fonte poderia associar indicadores ao esquema errado. A execução manual permanece bloqueada nesta fatia: nenhum chamado ou histórico é importado, transformado ou publicado ainda.
+
+### Mapeamento das propriedades
+
+Em **Administração > Mapeamentos**, o Administrador pode consultar o esquema atual das duas fontes e associar suas propriedades aos 21 campos conhecidos pela camada analítica. Oito campos estruturais são obrigatórios; os opcionais aumentam a cobertura de indicadores de tempo, SLA, agendamento, responsáveis e privacidade.
+
+A interface sugere associações pelos nomes encontrados nos anexos, mas nada é persistido automaticamente. Ao salvar, o servidor consulta novamente o Notion, resolve os nomes escolhidos para IDs estáveis de propriedades, valida tipos e duplicidades e grava o conjunto inteiro em uma transação SQLite junto com seu evento de auditoria. IDs de propriedades ficam somente no servidor; a API e a interface retornam apenas nomes e tipos.
+
+Propriedades de fórmula são aceitas somente nos campos em que a base atual pode depender delas. O mapeamento confirma a compatibilidade estrutural; os valores produzidos por cada fórmula ainda precisarão ser validados registro a registro durante a futura importação.
+
+Cada registro de chamado será identificado internamente pelo `page.id` que acompanha toda página retornada pela API do Notion. O código visível é apenas uma referência opcional e sua ausência não descartará o chamado. A propriedade de título pode ser mapeada como solicitante, mas nunca será usada como chave. O motivo permanece como classificação analítica; descrições livres não são sincronizadas nem combinadas para formar identidade ou categoria no v1.
 
 ## Verificações
 

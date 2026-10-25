@@ -50,8 +50,12 @@ O usuário pode reorganizar essa composição, restaurar o arranjo inicial do pa
 - Em caso de falha, permanece visível a última carga íntegra.
 - Registros removidos do Notion são preservados localmente como inativos e excluídos dos indicadores por padrão.
 - Correções de dados são feitas somente no Notion.
-- Chamado de teste e futuras exclusões são controlados por ID, com motivo e auditoria.
+- Cada chamado usa o `page.id` fornecido pela API do Notion como chave técnica estável, inclusive quando o código visível estiver vazio.
+- O código visível do chamado é uma referência opcional; sua ausência não exclui o registro dos indicadores.
+- O título da base pode representar o solicitante. Solicitante, código visível e identidade técnica são conceitos independentes.
+- Chamado de teste e futuras exclusões são controlados pelo `page.id`, com motivo e auditoria.
 - Categorias derivadas dos motivos usam mapa administrável.
+- O motivo do chamado é a classificação analítica. A descrição não é usada para identificar nem categorizar registros no v1, pois não será sincronizada por conter texto livre potencialmente sensível.
 - SLA utiliza a classificação produzida pelo Notion.
 - Demanda diária considera dias corridos, inclusive dias com zero chamados.
 - Tempos exibem duração corrida e minutos de expediente quando disponíveis.
@@ -126,7 +130,7 @@ Os anexos contêm 518 chamados entre 7 de julho e 20 de outubro de 2026 e 72 mov
 - Idioma da aplicação: português do Brasil.
 - Datas e cálculos usam o fuso `America/Sao_Paulo`.
 - A aplicação atende somente esta UPA e funciona como instalação de tenant único.
-- IDs de página do Notion serão as chaves estáveis para chamados e relacionamentos.
+- IDs de página do Notion serão as chaves estáveis para chamados e relacionamentos; códigos visíveis ausentes não reduzem a cobertura dos indicadores.
 - Não haverá envio de email, uploads de anexos, pagamentos, IA ou integrações externas além do Notion.
 - PDF e imagens registrarão filtros aplicados, data da geração e data da última sincronização.
 - O pacote manual de recuperação não incluirá senhas, sessões ou histórico completo de auditoria.

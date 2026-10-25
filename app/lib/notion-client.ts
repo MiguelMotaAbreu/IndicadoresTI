@@ -13,6 +13,18 @@ export type NotionPropertyDiagnostic = {
   type: string;
 };
 
+export type NotionPropertySchema = NotionPropertyDiagnostic & {
+  id: string;
+};
+
+export type NotionSourceSchema = {
+  key: NotionSourceKey;
+  label: string;
+  name: string;
+  dataSourceId: string;
+  properties: NotionPropertySchema[];
+};
+
 export type NotionSourceDiagnostic = {
   key: NotionSourceKey;
   label: string;
@@ -101,17 +113,24 @@ function readDatabase(value: unknown): { name: string; dataSourceId: string } {
   };
 }
 
-function readDataSource(value: unknown): NotionPropertyDiagnostic[] {
+function readDataSource(value: unknown): NotionPropertySchema[] {
   if (!isRecord(value) || value.object !== "data_source" || !isRecord(value.properties)) {
     throw new NotionClientError("invalid_response");
   }
 
   return Object.entries(value.properties)
     .map(([fallbackName, property]) => {
-      if (!isRecord(property) || typeof property.type !== "string" || !property.type.trim()) {
+      if (
+        !isRecord(property)
+        || typeof property.id !== "string"
+        || !property.id.trim()
+        || typeof property.type !== "string"
+        || !property.type.trim()
+      ) {
         throw new NotionClientError("invalid_response");
       }
       return {
+        id: property.id.trim(),
         name: typeof property.name === "string" && property.name.trim() ? property.name.trim() : fallbackName,
         type: property.type.trim(),
       };
@@ -171,23 +190,34 @@ export class NotionReadClient {
     key: NotionSourceKey,
     label: string,
     databaseId: string,
-  ): Promise<NotionSourceDiagnostic> {
+  ): Promise<NotionSourceSchema> {
     const database = readDatabase(await this.request(`/databases/${encodeURIComponent(databaseId)}`));
     const properties = readDataSource(await this.request(`/data_sources/${encodeURIComponent(database.dataSourceId)}`));
     return {
       key,
       label,
       name: database.name,
-      propertyCount: properties.length,
+      dataSourceId: database.dataSourceId,
       properties,
     };
   }
 
-  async testConnection(): Promise<NotionConnectionDiagnostic> {
-    const sources = await Promise.all([
+  async loadSchema(): Promise<NotionSourceSchema[]> {
+    return Promise.all([
       this.inspectSource("tickets", "Base de chamados", this.configuration.ticketsDatabaseId),
       this.inspectSource("history", "Base de histórico", this.configuration.historyDatabaseId),
     ]);
+  }
+
+  async testConnection(): Promise<NotionConnectionDiagnostic> {
+    const schemas = await this.loadSchema();
+    const sources = schemas.map((source) => ({
+      key: source.key,
+      label: source.label,
+      name: source.name,
+      propertyCount: source.properties.length,
+      properties: source.properties.map(({ name, type }) => ({ name, type })),
+    }));
     return {
       checkedAt: this.now().toISOString(),
       apiVersion: NOTION_API_VERSION,

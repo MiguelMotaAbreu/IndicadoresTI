@@ -1,5 +1,7 @@
 import { getApplicationDatabase } from "@/app/lib/database";
 import { inspectNotionConfiguration } from "@/app/lib/notion-configuration";
+import { notionMappingFields } from "@/app/lib/notion-mapping";
+import { NotionMappingStore } from "@/app/lib/notion-mapping-store";
 import { getCurrentSession } from "@/app/lib/request-session";
 import { SyncStore } from "@/app/lib/sync-store";
 
@@ -20,14 +22,27 @@ export async function GET() {
 
   try {
     const configuration = inspectNotionConfiguration();
-    const overview = new SyncStore(getApplicationDatabase().connection).overview(10);
-    const blockedReason = configuration.ready
-      ? "O conector e o mapeamento de propriedades ainda precisam ser habilitados."
-      : `Configuração pendente: ${configuration.missing.join(", ")}.`;
+    const database = getApplicationDatabase().connection;
+    const overview = new SyncStore(database).overview(10);
+    const mappedKeys = new Set(new NotionMappingStore(database).list().map((mapping) => mapping.fieldKey));
+    const requiredFields = notionMappingFields.filter((field) => field.required);
+    const mapping = {
+      mapped: mappedKeys.size,
+      total: notionMappingFields.length,
+      requiredMapped: requiredFields.filter((field) => mappedKeys.has(field.key)).length,
+      requiredTotal: requiredFields.length,
+      ready: requiredFields.every((field) => mappedKeys.has(field.key)),
+    };
+    const blockedReason = !configuration.ready
+      ? `Configuração pendente: ${configuration.missing.join(", ")}.`
+      : !mapping.ready
+        ? `Mapeamento obrigatório pendente: ${mapping.requiredMapped} de ${mapping.requiredTotal} campos configurados.`
+        : "O importador e a validação da carga serão habilitados na próxima etapa.";
 
     return noStoreJson({
       ok: true,
       configuration,
+      mapping,
       capabilities: { canStart: false, blockedReason },
       ...overview,
     });

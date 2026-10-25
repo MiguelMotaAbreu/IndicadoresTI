@@ -34,15 +34,15 @@ test("valida as duas bases e retorna somente o diagnóstico sanitizado", async (
       return jsonResponse({
         object: "data_source",
         properties: {
-          title: { name: "Chamado", type: "title" },
-          opened: { name: "Abertura", type: "date" },
+          title: { id: "title-property", name: "Chamado", type: "title" },
+          opened: { id: "opened-property", name: "Abertura", type: "date" },
         },
       });
     }
     if (String(url).endsWith("/data_sources/history-source")) {
       return jsonResponse({
         object: "data_source",
-        properties: { event: { name: "Movimentação", type: "select" } },
+        properties: { event: { id: "event-property", name: "Movimentação", type: "select" } },
       });
     }
     return jsonResponse({}, 404);
@@ -84,6 +84,7 @@ test("valida as duas bases e retorna somente o diagnóstico sanitizado", async (
   assert.equal(JSON.stringify(diagnostic).includes(configuration.token), false);
   assert.equal(JSON.stringify(diagnostic).includes("tickets-database"), false);
   assert.equal(JSON.stringify(diagnostic).includes("tickets-source"), false);
+  assert.equal(JSON.stringify(diagnostic).includes("title-property"), false);
 });
 
 test("traduz rejeição de credencial sem repassar a resposta remota", async () => {

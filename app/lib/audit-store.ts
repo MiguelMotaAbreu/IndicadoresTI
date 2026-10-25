@@ -11,7 +11,8 @@ export type AuditAction =
   | "user.created"
   | "user.deactivated"
   | "user.reactivated"
-  | "sync.connection_tested";
+  | "sync.connection_tested"
+  | "sync.mapping_saved";
 
 export type AuditOutcome = "success" | "failure";
 

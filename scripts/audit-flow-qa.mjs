@@ -24,6 +24,10 @@ let applicationProcess = null;
 let disposableDirectory = null;
 let applicationOutput = "";
 
+function hasProcessExited(childProcess) {
+  return childProcess.exitCode !== null || childProcess.signalCode !== null;
+}
+
 function rememberApplicationOutput(chunk) {
   applicationOutput = `${applicationOutput}${chunk.toString()}`.slice(-12_000);
 }
@@ -66,7 +70,7 @@ async function waitForApplication(baseUrl, childProcess) {
   const deadline = Date.now() + 60_000;
 
   while (Date.now() < deadline) {
-    if (childProcess.exitCode !== null) {
+    if (hasProcessExited(childProcess)) {
       throw new Error(
         `O servidor de QA encerrou antes de ficar disponível.\n${applicationOutput.trim()}`,
       );
@@ -156,10 +160,10 @@ async function prepareDisposableApplication() {
 }
 
 async function stopApplication() {
-  if (!applicationProcess || applicationProcess.exitCode !== null) return;
+  if (!applicationProcess || hasProcessExited(applicationProcess)) return;
 
   async function waitForExit(timeout) {
-    if (applicationProcess.exitCode !== null) return;
+    if (hasProcessExited(applicationProcess)) return;
     await Promise.race([
       new Promise((resolveStop) => applicationProcess.once("exit", resolveStop)),
       new Promise((resolveStop) => setTimeout(resolveStop, timeout)),
@@ -182,12 +186,12 @@ async function stopApplication() {
       killer.once("exit", (exitCode) => resolveStop({ exitCode, output }));
     });
 
-    if (taskkillResult.exitCode !== 0 && applicationProcess.exitCode === null) {
+    if (taskkillResult.exitCode !== 0 && !hasProcessExited(applicationProcess)) {
       applicationProcess.kill();
     }
     await waitForExit(5_000);
 
-    if (applicationProcess.exitCode === null) {
+    if (!hasProcessExited(applicationProcess)) {
       throw new Error(
         `Não foi possível encerrar o servidor temporário de QA. ${taskkillResult.output.trim()}`,
       );
@@ -197,7 +201,7 @@ async function stopApplication() {
 
   applicationProcess.kill("SIGTERM");
   await waitForExit(5_000);
-  if (applicationProcess.exitCode === null) applicationProcess.kill("SIGKILL");
+  if (!hasProcessExited(applicationProcess)) applicationProcess.kill("SIGKILL");
 }
 
 async function removeDisposableDirectory() {
@@ -237,6 +241,10 @@ async function runAuditFlow(baseUrl) {
     if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
     const anonymousConnectionTest = await anonymousContext.request.post(`${baseUrl}/api/admin/sync/connection`);
     if (anonymousConnectionTest.status() !== 401) throw new Error("O teste de conexão aceitou uma solicitação anônima.");
+    const anonymousMapping = await anonymousContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
+    if (anonymousMapping.status() !== 401) throw new Error("Os mapeamentos aceitaram uma consulta anônima.");
+    const anonymousMappingUpdate = await anonymousContext.request.put(`${baseUrl}/api/admin/sync/mapping`, { data: { mappings: {} } });
+    if (anonymousMappingUpdate.status() !== 401) throw new Error("Os mapeamentos aceitaram uma alteração anônima.");
 
     const failedLoginPage = await anonymousContext.newPage();
     await login(failedLoginPage, administratorEmail, "senha propositalmente incorreta");
@@ -271,6 +279,10 @@ async function runAuditFlow(baseUrl) {
       if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
       const forbiddenConnectionTest = await analystContext.request.post(`${baseUrl}/api/admin/sync/connection`);
       if (forbiddenConnectionTest.status() !== 403) throw new Error("Uma conta Analista testou a conexão com o Notion.");
+      const forbiddenMapping = await analystContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
+      if (forbiddenMapping.status() !== 403) throw new Error("Uma conta Analista consultou os mapeamentos.");
+      const forbiddenMappingUpdate = await analystContext.request.put(`${baseUrl}/api/admin/sync/mapping`, { data: { mappings: {} } });
+      if (forbiddenMappingUpdate.status() !== 403) throw new Error("Uma conta Analista alterou os mapeamentos.");
     } finally {
       await analystContext.close();
     }
@@ -283,6 +295,12 @@ async function runAuditFlow(baseUrl) {
       const missingConfigurationPayload = await missingConfigurationTest.json();
       if (missingConfigurationPayload.code !== "configuration_missing") {
         throw new Error("O teste de conexão não classificou a configuração incompleta.");
+      }
+      const missingMappingUpdate = await administratorContext.request.put(`${baseUrl}/api/admin/sync/mapping`, {
+        data: { mappings: {} },
+      });
+      if (missingMappingUpdate.status() !== 409) {
+        throw new Error("O mapeamento não recusou uma configuração incompleta.");
       }
     }
 
@@ -306,9 +324,19 @@ async function runAuditFlow(baseUrl) {
     if (syncPayload.latestSnapshot !== null || syncPayload.capabilities?.canStart !== false) {
       throw new Error("O estado inicial da sincronização não corresponde ao banco descartável.");
     }
+    if (syncPayload.mapping?.requiredMapped !== 0 || syncPayload.mapping?.ready !== false) {
+      throw new Error("O estado inicial dos mapeamentos não corresponde ao banco descartável.");
+    }
     const serializedSync = JSON.stringify(syncPayload);
     if (serializedSync.includes("PULSETI_NOTION_TOKEN") || serializedSync.includes("secret_")) {
       throw new Error("O estado das sincronizações expôs uma credencial do Notion.");
+    }
+
+    const mappingResponse = await administratorContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
+    if (!mappingResponse.ok()) throw new Error("A conta Administrador não conseguiu consultar os mapeamentos.");
+    const mappingPayload = await mappingResponse.json();
+    if (mappingPayload.mappings?.length !== 0 || mappingPayload.completeness?.requiredMapped !== 0) {
+      throw new Error("O estado inicial da tela de mapeamentos não está vazio.");
     }
 
     await administratorPage.getByRole("button", { name: "Administração" }).click();
@@ -317,6 +345,12 @@ async function runAuditFlow(baseUrl) {
     await administratorPage.getByText("Execução ainda indisponível", { exact: true }).waitFor();
     if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Testar conexão" }).isDisabled())) {
       throw new Error("A interface liberou o teste de conexão sem configuração completa.");
+    }
+    await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();
+    await administratorPage.getByRole("heading", { name: "Mapeamentos do Notion" }).waitFor();
+    await administratorPage.getByText("Nenhum mapeamento salvo", { exact: true }).waitFor();
+    if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Carregar propriedades" }).isDisabled())) {
+      throw new Error("A interface liberou o mapeamento sem configuração completa.");
     }
     await administratorPage.getByRole("button", { name: "Auditoria" }).click();
     await administratorPage.getByRole("heading", { name: "Log de auditoria" }).waitFor();
@@ -331,7 +365,7 @@ async function runAuditFlow(baseUrl) {
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: auditoria, autorização e diagnóstico administrativo das sincronizações funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, diagnóstico e estado dos mapeamentos funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

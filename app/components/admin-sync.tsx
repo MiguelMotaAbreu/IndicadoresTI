@@ -34,6 +34,13 @@ type SyncResponse = {
     totalSources: number;
     missing: string[];
   };
+  mapping: {
+    mapped: number;
+    total: number;
+    requiredMapped: number;
+    requiredTotal: number;
+    ready: boolean;
+  };
   capabilities: { canStart: boolean; blockedReason: string };
   activeRun: SyncRun | null;
   latestSnapshot: (SnapshotCounts & { id: string; publishedAt: string }) | null;
@@ -185,7 +192,7 @@ export function AdminSync() {
           <DatabaseIcon size={22} />
           <b>Fonte</b>
           <strong>{state?.configuration.ready ? "Notion · Somente leitura" : "Configuração pendente"}</strong>
-          <small>{state ? `${state.configuration.configuredSources} de ${state.configuration.totalSources} bases informadas` : "Consultando configuração..."}</small>
+          <small>{state ? `${state.configuration.configuredSources}/${state.configuration.totalSources} bases · ${state.mapping.requiredMapped}/${state.mapping.requiredTotal} campos obrigatórios` : "Consultando configuração..."}</small>
         </span>
         <span className={latestRun?.status === "failed" ? "has-warning" : ""}>
           <ActivityIcon size={22} />

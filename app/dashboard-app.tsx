@@ -59,6 +59,7 @@ import {
 } from "@phosphor-icons/react";
 import { logout } from "./actions/auth";
 import { AdminAudit } from "./components/admin-audit";
+import { AdminMapping } from "./components/admin-mapping";
 import { AdminSync } from "./components/admin-sync";
 import { AdminUsers } from "./components/admin-users";
 import { Brand } from "./components/brand";
@@ -1319,7 +1320,7 @@ function Admin({ currentUser }: { currentUser: CurrentUser }) {
         <section className="admin-content">
           {section === "sync" && <AdminSync />}
           {section === "users" && <AdminUsers currentUserId={currentUser.id} />}
-          {section === "mapping" && <AdminPlaceholder icon={DatabaseIcon} title="Mapeamentos do Notion" description="Associe propriedades lógicas, categorias derivadas e registros excluídos sem alterar a fonte operacional." action="Revisar mapeamentos" />}
+          {section === "mapping" && <AdminMapping />}
           {section === "health" && <AdminPlaceholder icon={ActivityIcon} title="Saúde da instalação" description="SQLite, espaço em disco, serviço Docker, certificado local e conectividade com a API." action="Executar diagnóstico" />}
           {section === "audit" && <AdminAudit />}
         </section>

@@ -155,6 +155,33 @@ const databaseMigrations: readonly DatabaseMigration[] = [
       ON sync_runs (started_at DESC);
     `,
   },
+  {
+    version: 6,
+    name: "create_notion_property_mappings",
+    sql: `
+      CREATE TABLE IF NOT EXISTS notion_property_mappings (
+        field_key TEXT PRIMARY KEY CHECK (length(field_key) BETWEEN 3 AND 80),
+        source_key TEXT NOT NULL CHECK (source_key IN ('tickets', 'history')),
+        property_id TEXT NOT NULL CHECK (length(trim(property_id)) > 0),
+        property_name TEXT NOT NULL CHECK (length(trim(property_name)) > 0),
+        property_type TEXT NOT NULL CHECK (length(trim(property_type)) > 0),
+        updated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        updated_by_name TEXT NOT NULL CHECK (length(trim(updated_by_name)) BETWEEN 2 AND 100),
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS notion_property_mappings_source_idx
+      ON notion_property_mappings (source_key, field_key);
+    `,
+  },
+  {
+    version: 7,
+    name: "remove_legacy_ticket_title_mapping",
+    sql: `
+      DELETE FROM notion_property_mappings
+      WHERE field_key = 'ticket.title';
+    `,
+  },
 ] as const;
 
 export const LATEST_DATABASE_VERSION = databaseMigrations.at(-1)?.version ?? 0;
