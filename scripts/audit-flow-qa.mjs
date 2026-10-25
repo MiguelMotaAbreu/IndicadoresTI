@@ -139,6 +139,9 @@ async function prepareDisposableApplication() {
         CI: "1",
         NEXT_TELEMETRY_DISABLED: "1",
         PULSETI_DATABASE_PATH: databasePath,
+        PULSETI_NOTION_TOKEN: "",
+        PULSETI_NOTION_TICKETS_DATABASE_ID: "",
+        PULSETI_NOTION_HISTORY_DATABASE_ID: "",
       },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -232,6 +235,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousAudit.status() !== 401) throw new Error("A auditoria aceitou uma consulta anônima.");
     const anonymousSync = await anonymousContext.request.get(`${baseUrl}/api/admin/sync`);
     if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
+    const anonymousConnectionTest = await anonymousContext.request.post(`${baseUrl}/api/admin/sync/connection`);
+    if (anonymousConnectionTest.status() !== 401) throw new Error("O teste de conexão aceitou uma solicitação anônima.");
 
     const failedLoginPage = await anonymousContext.newPage();
     await login(failedLoginPage, administratorEmail, "senha propositalmente incorreta");
@@ -264,15 +269,30 @@ async function runAuditFlow(baseUrl) {
       if (forbiddenAudit.status() !== 403) throw new Error("Uma conta Analista consultou a auditoria.");
       const forbiddenSync = await analystContext.request.get(`${baseUrl}/api/admin/sync`);
       if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
+      const forbiddenConnectionTest = await analystContext.request.post(`${baseUrl}/api/admin/sync/connection`);
+      if (forbiddenConnectionTest.status() !== 403) throw new Error("Uma conta Analista testou a conexão com o Notion.");
     } finally {
       await analystContext.close();
+    }
+
+    if (!externalBaseUrl) {
+      const missingConfigurationTest = await administratorContext.request.post(`${baseUrl}/api/admin/sync/connection`);
+      if (missingConfigurationTest.status() !== 409) {
+        throw new Error("O teste de conexão não recusou uma configuração incompleta.");
+      }
+      const missingConfigurationPayload = await missingConfigurationTest.json();
+      if (missingConfigurationPayload.code !== "configuration_missing") {
+        throw new Error("O teste de conexão não classificou a configuração incompleta.");
+      }
     }
 
     const auditResponse = await administratorContext.request.get(`${baseUrl}/api/admin/audit?limit=200`);
     if (!auditResponse.ok()) throw new Error("A conta Administrador não conseguiu consultar a auditoria.");
     const auditPayload = await auditResponse.json();
     const actions = new Set(auditPayload.events.map((event) => event.action));
-    for (const expectedAction of ["auth.login_failed", "auth.login_succeeded", "user.created", "user.deactivated", "user.reactivated"]) {
+    const expectedActions = ["auth.login_failed", "auth.login_succeeded", "user.created", "user.deactivated", "user.reactivated"];
+    if (!externalBaseUrl) expectedActions.push("sync.connection_tested");
+    for (const expectedAction of expectedActions) {
       if (!actions.has(expectedAction)) throw new Error(`O evento ${expectedAction} não foi registrado.`);
     }
     const serializedAudit = JSON.stringify(auditPayload);
@@ -295,15 +315,23 @@ async function runAuditFlow(baseUrl) {
     await administratorPage.getByRole("heading", { name: "Sincronização com o Notion" }).waitFor();
     await administratorPage.getByText("Nenhuma carga publicada", { exact: true }).waitFor();
     await administratorPage.getByText("Execução ainda indisponível", { exact: true }).waitFor();
+    if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Testar conexão" }).isDisabled())) {
+      throw new Error("A interface liberou o teste de conexão sem configuração completa.");
+    }
     await administratorPage.getByRole("button", { name: "Auditoria" }).click();
     await administratorPage.getByRole("heading", { name: "Log de auditoria" }).waitFor();
     await administratorPage.getByText("Usuário criado", { exact: true }).first().waitFor();
+
+    if (!externalBaseUrl) {
+      await administratorPage.getByLabel("Categoria").selectOption("sync");
+      await administratorPage.getByText("Conexão com o Notion testada", { exact: true }).first().waitFor();
+    }
 
     await administratorPage.getByLabel("Categoria").selectOption("auth");
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: auditoria e estado administrativo das sincronizações funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização e diagnóstico administrativo das sincronizações funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { NotionConnectionConfiguration } from "./notion-client";
+
 type Environment = Record<string, string | undefined>;
 
 export type NotionConfigurationStatus = {
@@ -27,4 +29,15 @@ export function inspectNotionConfiguration(environment: Environment = process.en
     totalSources: sources.length,
     missing,
   };
+}
+
+export function loadNotionConfiguration(
+  environment: Environment = process.env,
+): NotionConnectionConfiguration | null {
+  const token = environment.PULSETI_NOTION_TOKEN?.trim() ?? "";
+  const ticketsDatabaseId = environment.PULSETI_NOTION_TICKETS_DATABASE_ID?.trim() ?? "";
+  const historyDatabaseId = environment.PULSETI_NOTION_HISTORY_DATABASE_ID?.trim() ?? "";
+
+  if (!token || !ticketsDatabaseId || !historyDatabaseId) return null;
+  return { token, ticketsDatabaseId, historyDatabaseId };
 }

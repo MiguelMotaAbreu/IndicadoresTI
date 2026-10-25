@@ -16,6 +16,8 @@ npm run dev
 
 Abra [http://localhost:3000](http://localhost:3000).
 
+O Tailwind examina somente o diretório `app`, onde ficam os componentes e estilos. Essa delimitação evita que o compilador de desenvolvimento tente observar arquivos transitórios do SQLite em `data` enquanto eles estão bloqueados pelo banco no Windows.
+
 ## Persistência local
 
 Os layouts e as métricas personalizadas são persistidos em SQLite. Por padrão, a aplicação cria o arquivo `data/pulseti.sqlite` automaticamente.
@@ -71,7 +73,7 @@ Desativar uma conta preserva sua identidade para referências históricas e revo
 
 ### Auditoria de segurança
 
-Administradores podem consultar em **Administração > Auditoria** os 200 eventos mais recentes de login, logout, troca de senha e criação, desativação ou reativação de usuários. A tela permite pesquisar e filtrar por categoria e resultado.
+Administradores podem consultar em **Administração > Auditoria** os 200 eventos mais recentes de login, logout, troca de senha, gestão de usuários e testes da integração com o Notion. A tela permite pesquisar e filtrar por categoria e resultado.
 
 Os eventos guardam um retrato do ator, alvo, resultado, data e resumo da ação. Senhas, hashes e tokens de sessão nunca fazem parte do registro. Alterações de usuários e seus eventos são confirmados na mesma transação SQLite.
 
@@ -81,7 +83,7 @@ Administradores podem consultar em **Administração > Sincronização** o estad
 
 O ciclo persistente de uma carga possui os estados `running`, `succeeded` e `failed`. Somente uma execução pode permanecer ativa, e a publicação de um novo snapshot acontece em uma única transação: a carga anterior só é substituída quando a nova carga foi completamente validada. Falhas preservam o último snapshot publicado.
 
-As credenciais e IDs futuros serão lidos apenas no servidor pelas variáveis abaixo; a API administrativa expõe somente se cada requisito está configurado, nunca os valores:
+As credenciais e IDs são lidos apenas no servidor pelas variáveis abaixo; a API administrativa expõe somente se cada requisito está configurado, nunca os valores:
 
 ```powershell
 $env:PULSETI_NOTION_TOKEN="token-da-integracao"
@@ -89,7 +91,9 @@ $env:PULSETI_NOTION_TICKETS_DATABASE_ID="id-da-base-de-chamados"
 $env:PULSETI_NOTION_HISTORY_DATABASE_ID="id-da-base-de-historico"
 ```
 
-Esta fatia ainda não consulta a API do Notion. A execução manual permanecerá bloqueada até que o conector e o mapeamento das propriedades sejam implementados.
+Com as três variáveis configuradas, o botão **Testar conexão** faz consultas somente leitura usando a versão `2026-03-11` da API do Notion. O diagnóstico verifica o acesso às duas bases, resolve a fonte de dados de cada base e apresenta apenas nome, quantidade e tipos das propriedades. Tokens, IDs internos e mensagens brutas do serviço não são devolvidos ao navegador nem registrados na auditoria.
+
+Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explícita, pois escolher silenciosamente uma fonte poderia associar indicadores ao esquema errado. A execução manual permanece bloqueada nesta fatia: nenhum chamado ou histórico é importado, transformado ou publicado ainda.
 
 ## Verificações
 

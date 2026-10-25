@@ -16,14 +16,15 @@ type AuditAction =
   | "auth.logout"
   | "user.created"
   | "user.deactivated"
-  | "user.reactivated";
+  | "user.reactivated"
+  | "sync.connection_tested";
 
 type AuditEvent = {
   id: string;
   occurredAt: string;
   actor: { userId: string; displayName: string; role: "administrador" | "analista" } | null;
   action: AuditAction;
-  targetType: "account" | "session";
+  targetType: "account" | "session" | "integration";
   targetId: string | null;
   targetLabel: string | null;
   outcome: "success" | "failure";
@@ -38,6 +39,7 @@ const actionLabels: Record<AuditAction, string> = {
   "user.created": "Usuário criado",
   "user.deactivated": "Usuário desativado",
   "user.reactivated": "Usuário reativado",
+  "sync.connection_tested": "Conexão com o Notion testada",
 };
 
 async function fetchAuditEvents(signal?: AbortSignal): Promise<AuditEvent[]> {
@@ -67,7 +69,7 @@ export function AdminAudit() {
   const [referenceTime, setReferenceTime] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [category, setCategory] = useState<"all" | "auth" | "user">("all");
+  const [category, setCategory] = useState<"all" | "auth" | "user" | "sync">("all");
   const [outcome, setOutcome] = useState<"all" | "success" | "failure">("all");
   const [search, setSearch] = useState("");
 
@@ -122,20 +124,20 @@ export function AdminAudit() {
   return (
     <div className="admin-audit">
       <div className="admin-section-heading">
-        <div><h2>Log de auditoria</h2><p>Rastreabilidade append-only de autenticação e gestão de usuários.</p></div>
+        <div><h2>Log de auditoria</h2><p>Rastreabilidade append-only de autenticação, usuários e integrações.</p></div>
         <button className="button button--ghost" disabled={loading} onClick={() => void refresh()}><ArrowsClockwiseIcon className={loading ? "spin" : ""} size={17} />Atualizar</button>
       </div>
 
       <div className="admin-audit__summary">
         <span><ListChecksIcon size={20} /><strong>{events.length}</strong><small>eventos carregados</small></span>
         <span><CheckCircleIcon size={20} /><strong>{last24Hours}</strong><small>nas últimas 24 horas</small></span>
-        <span className={failures > 0 ? "has-warning" : ""}><WarningCircleIcon size={20} /><strong>{failures}</strong><small>tentativas rejeitadas</small></span>
+        <span className={failures > 0 ? "has-warning" : ""}><WarningCircleIcon size={20} /><strong>{failures}</strong><small>eventos com falha</small></span>
         <span><ListChecksIcon size={20} /><strong>{userChanges}</strong><small>alterações de usuários</small></span>
       </div>
 
       <div className="admin-audit__filters">
         <label className="admin-audit__search"><MagnifyingGlassIcon size={15} /><span className="sr-only">Buscar eventos</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar ator, alvo ou evento..." /></label>
-        <label><span>Categoria</span><select value={category} onChange={(event) => setCategory(event.target.value as typeof category)}><option value="all">Todas</option><option value="auth">Autenticação</option><option value="user">Usuários</option></select></label>
+        <label><span>Categoria</span><select value={category} onChange={(event) => setCategory(event.target.value as typeof category)}><option value="all">Todas</option><option value="auth">Autenticação</option><option value="user">Usuários</option><option value="sync">Sincronização</option></select></label>
         <label><span>Resultado</span><select value={outcome} onChange={(event) => setOutcome(event.target.value as typeof outcome)}><option value="all">Todos</option><option value="success">Sucesso</option><option value="failure">Falha</option></select></label>
         <small>{filteredEvents.length} de {events.length} eventos</small>
       </div>

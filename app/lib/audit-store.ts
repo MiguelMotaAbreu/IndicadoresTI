@@ -10,7 +10,8 @@ export type AuditAction =
   | "auth.logout"
   | "user.created"
   | "user.deactivated"
-  | "user.reactivated";
+  | "user.reactivated"
+  | "sync.connection_tested";
 
 export type AuditOutcome = "success" | "failure";
 
@@ -23,7 +24,7 @@ export type AuditActor = {
 export type AppendAuditEventInput = {
   actor: AuditActor | null;
   action: AuditAction;
-  targetType: "account" | "session";
+  targetType: "account" | "session" | "integration";
   targetId?: string | null;
   targetLabel?: string | null;
   outcome: AuditOutcome;
@@ -35,7 +36,7 @@ export type AuditEvent = {
   occurredAt: string;
   actor: AuditActor | null;
   action: AuditAction;
-  targetType: "account" | "session";
+  targetType: "account" | "session" | "integration";
   targetId: string | null;
   targetLabel: string | null;
   outcome: AuditOutcome;
@@ -49,7 +50,7 @@ type AuditEventRow = {
   actor_name: string | null;
   actor_role: UserRole | null;
   action: AuditAction;
-  target_type: "account" | "session";
+  target_type: "account" | "session" | "integration";
   target_id: string | null;
   target_label: string | null;
   outcome: AuditOutcome;

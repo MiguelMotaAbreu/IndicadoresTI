@@ -1,0 +1,197 @@
+export const NOTION_API_VERSION = "2026-03-11";
+
+export type NotionSourceKey = "tickets" | "history";
+
+export type NotionConnectionConfiguration = {
+  token: string;
+  ticketsDatabaseId: string;
+  historyDatabaseId: string;
+};
+
+export type NotionPropertyDiagnostic = {
+  name: string;
+  type: string;
+};
+
+export type NotionSourceDiagnostic = {
+  key: NotionSourceKey;
+  label: string;
+  name: string;
+  propertyCount: number;
+  properties: NotionPropertyDiagnostic[];
+};
+
+export type NotionConnectionDiagnostic = {
+  checkedAt: string;
+  apiVersion: typeof NOTION_API_VERSION;
+  sources: NotionSourceDiagnostic[];
+};
+
+export type NotionClientErrorCode =
+  | "configuration_missing"
+  | "unauthorized"
+  | "forbidden"
+  | "source_not_found"
+  | "rate_limited"
+  | "multiple_data_sources"
+  | "invalid_response"
+  | "unavailable";
+
+const SAFE_ERROR_MESSAGES: Record<NotionClientErrorCode, string> = {
+  configuration_missing: "A integração com o Notion ainda não está completamente configurada.",
+  unauthorized: "O Notion rejeitou a credencial configurada.",
+  forbidden: "A integração não possui acesso a uma das bases configuradas.",
+  source_not_found: "Uma das bases configuradas não foi encontrada ou não foi compartilhada com a integração.",
+  rate_limited: "O Notion limitou temporariamente as consultas. Tente novamente em alguns instantes.",
+  multiple_data_sources: "Uma base configurada possui mais de uma fonte de dados. Informe uma fonte específica antes de sincronizar.",
+  invalid_response: "O Notion respondeu em um formato que a aplicação não reconhece.",
+  unavailable: "Não foi possível contatar o Notion neste momento.",
+};
+
+export class NotionClientError extends Error {
+  readonly code: NotionClientErrorCode;
+
+  constructor(code: NotionClientErrorCode) {
+    super(SAFE_ERROR_MESSAGES[code]);
+    this.name = "NotionClientError";
+    this.code = code;
+  }
+}
+
+type FetchImplementation = typeof fetch;
+
+type NotionClientOptions = {
+  fetchImplementation?: FetchImplementation;
+  timeoutMs?: number;
+  baseUrl?: string;
+  now?: () => Date;
+};
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeRequired(value: string): string {
+  return value.trim();
+}
+
+function errorForStatus(status: number): NotionClientError {
+  if (status === 401) return new NotionClientError("unauthorized");
+  if (status === 403) return new NotionClientError("forbidden");
+  if (status === 404) return new NotionClientError("source_not_found");
+  if (status === 429) return new NotionClientError("rate_limited");
+  if (status >= 500) return new NotionClientError("unavailable");
+  return new NotionClientError("invalid_response");
+}
+
+function readDatabase(value: unknown): { name: string; dataSourceId: string } {
+  if (!isRecord(value) || value.object !== "database" || !Array.isArray(value.data_sources)) {
+    throw new NotionClientError("invalid_response");
+  }
+  if (value.data_sources.length > 1) throw new NotionClientError("multiple_data_sources");
+  const dataSource = value.data_sources[0];
+  if (!isRecord(dataSource) || typeof dataSource.id !== "string" || !dataSource.id.trim()) {
+    throw new NotionClientError("invalid_response");
+  }
+  return {
+    name: typeof dataSource.name === "string" && dataSource.name.trim() ? dataSource.name.trim() : "Fonte sem nome",
+    dataSourceId: dataSource.id,
+  };
+}
+
+function readDataSource(value: unknown): NotionPropertyDiagnostic[] {
+  if (!isRecord(value) || value.object !== "data_source" || !isRecord(value.properties)) {
+    throw new NotionClientError("invalid_response");
+  }
+
+  return Object.entries(value.properties)
+    .map(([fallbackName, property]) => {
+      if (!isRecord(property) || typeof property.type !== "string" || !property.type.trim()) {
+        throw new NotionClientError("invalid_response");
+      }
+      return {
+        name: typeof property.name === "string" && property.name.trim() ? property.name.trim() : fallbackName,
+        type: property.type.trim(),
+      };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+}
+
+export class NotionReadClient {
+  private readonly configuration: NotionConnectionConfiguration;
+  private readonly fetchImplementation: FetchImplementation;
+  private readonly timeoutMs: number;
+  private readonly baseUrl: string;
+  private readonly now: () => Date;
+
+  constructor(configuration: NotionConnectionConfiguration, options: NotionClientOptions = {}) {
+    this.configuration = {
+      token: normalizeRequired(configuration.token),
+      ticketsDatabaseId: normalizeRequired(configuration.ticketsDatabaseId),
+      historyDatabaseId: normalizeRequired(configuration.historyDatabaseId),
+    };
+    if (!this.configuration.token || !this.configuration.ticketsDatabaseId || !this.configuration.historyDatabaseId) {
+      throw new NotionClientError("configuration_missing");
+    }
+    this.fetchImplementation = options.fetchImplementation ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? 10_000;
+    this.baseUrl = (options.baseUrl ?? "https://api.notion.com/v1").replace(/\/$/, "");
+    this.now = options.now ?? (() => new Date());
+  }
+
+  private async request(path: string): Promise<unknown> {
+    let response: Response;
+    try {
+      response = await this.fetchImplementation(`${this.baseUrl}${path}`, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${this.configuration.token}`,
+          "Notion-Version": NOTION_API_VERSION,
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      if (error instanceof NotionClientError) throw error;
+      throw new NotionClientError("unavailable");
+    }
+
+    if (!response.ok) throw errorForStatus(response.status);
+    try {
+      return await response.json();
+    } catch {
+      throw new NotionClientError("invalid_response");
+    }
+  }
+
+  private async inspectSource(
+    key: NotionSourceKey,
+    label: string,
+    databaseId: string,
+  ): Promise<NotionSourceDiagnostic> {
+    const database = readDatabase(await this.request(`/databases/${encodeURIComponent(databaseId)}`));
+    const properties = readDataSource(await this.request(`/data_sources/${encodeURIComponent(database.dataSourceId)}`));
+    return {
+      key,
+      label,
+      name: database.name,
+      propertyCount: properties.length,
+      properties,
+    };
+  }
+
+  async testConnection(): Promise<NotionConnectionDiagnostic> {
+    const sources = await Promise.all([
+      this.inspectSource("tickets", "Base de chamados", this.configuration.ticketsDatabaseId),
+      this.inspectSource("history", "Base de histórico", this.configuration.historyDatabaseId),
+    ]);
+    return {
+      checkedAt: this.now().toISOString(),
+      apiVersion: NOTION_API_VERSION,
+      sources,
+    };
+  }
+}

@@ -83,3 +83,25 @@ test("preserva o retrato do ator e limita a quantidade consultada", async () => 
     database.close();
   }
 });
+
+test("registra diagnóstico de integração sem armazenar credenciais", async () => {
+  const database = new ApplicationDatabase(":memory:");
+  const audit = new AuditStore(database.connection);
+
+  try {
+    const event = audit.append({
+      actor: null,
+      action: "sync.connection_tested",
+      targetType: "integration",
+      targetLabel: "Notion",
+      outcome: "failure",
+      summary: "Teste de conexão recusado porque a configuração está incompleta.",
+    });
+
+    assert.equal(event.action, "sync.connection_tested");
+    assert.equal(event.targetType, "integration");
+    assert.equal(event.targetLabel, "Notion");
+  } finally {
+    database.close();
+  }
+});
