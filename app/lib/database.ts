@@ -83,6 +83,32 @@ const databaseMigrations: readonly DatabaseMigration[] = [
       WHERE revoked_at IS NULL;
     `,
   },
+  {
+    version: 4,
+    name: "create_audit_events",
+    sql: `
+      CREATE TABLE IF NOT EXISTS audit_events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        occurred_at TEXT NOT NULL,
+        actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        actor_name TEXT,
+        actor_role TEXT CHECK (actor_role IS NULL OR actor_role IN ('administrador', 'analista')),
+        action TEXT NOT NULL CHECK (length(action) BETWEEN 3 AND 80),
+        target_type TEXT NOT NULL CHECK (length(target_type) BETWEEN 2 AND 40),
+        target_id TEXT,
+        target_label TEXT CHECK (target_label IS NULL OR length(target_label) <= 254),
+        outcome TEXT NOT NULL CHECK (outcome IN ('success', 'failure')),
+        summary TEXT NOT NULL CHECK (length(summary) BETWEEN 3 AND 500)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS audit_events_occurred_at_idx
+      ON audit_events (occurred_at DESC);
+
+      CREATE INDEX IF NOT EXISTS audit_events_action_idx
+      ON audit_events (action, occurred_at DESC);
+    `,
+  },
 ] as const;
 
 export const LATEST_DATABASE_VERSION = databaseMigrations.at(-1)?.version ?? 0;

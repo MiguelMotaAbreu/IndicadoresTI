@@ -181,3 +181,40 @@ test("desativa e reativa a conta sem apagar identidade ou senha", async () => {
     database.close();
   }
 });
+
+test("reverte criação e troca de senha quando o efeito transacional falha", async () => {
+  const database = new ApplicationDatabase(":memory:");
+  const store = new UserStore(database.connection);
+
+  try {
+    await assert.rejects(
+      store.createAtomically({
+        email: "falha@upa.local",
+        displayName: "Falha transacional",
+        role: "analista",
+        temporaryPassword: "Senha temporária 123",
+      }, () => {
+        throw new Error("falha de auditoria");
+      }),
+      /falha de auditoria/,
+    );
+    assert.equal(store.count(), 0);
+
+    const analyst = await store.create({
+      email: "analista@upa.local",
+      displayName: "Analista TI",
+      role: "analista",
+      temporaryPassword: "Senha temporária 456",
+    });
+    await assert.rejects(
+      store.changePasswordAtomically(analyst.id, "Senha definitiva 789", () => {
+        throw new Error("falha de sessão");
+      }),
+      /falha de sessão/,
+    );
+    assert.deepEqual(await store.authenticate(analyst.email, "Senha temporária 456"), analyst);
+    assert.equal(await store.authenticate(analyst.email, "Senha definitiva 789"), null);
+  } finally {
+    database.close();
+  }
+});

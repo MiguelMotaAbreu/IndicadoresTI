@@ -38,6 +38,7 @@ A versão atual cria:
 - `dashboard_drafts`: layouts e métricas personalizadas por usuário e painel.
 - `users`: estrutura para administradores e analistas, incluindo hash de senha, troca obrigatória e desativação de conta.
 - `user_sessions`: sessões opacas com expiração por inatividade e limite absoluto.
+- `audit_events`: registro append-only dos eventos de autenticação e gestão de usuários.
 
 A autenticação de credenciais e o ciclo de sessões estão conectados à interface. O dashboard e suas APIs exigem uma sessão válida, e a primeira conta é criada uma única vez pelo comando de bootstrap abaixo; nenhuma conta ou senha padrão é incluída no código.
 
@@ -66,6 +67,12 @@ Administradores podem abrir **Administração > Usuários** para listar contas, 
 
 Desativar uma conta preserva sua identidade para referências históricas e revoga imediatamente todas as sessões abertas. A própria conta administrativa em uso não pode ser desativada, evitando o bloqueio acidental do único acesso em operação. A reativação mantém a senha que o usuário já havia definido.
 
+### Auditoria de segurança
+
+Administradores podem consultar em **Administração > Auditoria** os 200 eventos mais recentes de login, logout, troca de senha e criação, desativação ou reativação de usuários. A tela permite pesquisar e filtrar por categoria e resultado.
+
+Os eventos guardam um retrato do ator, alvo, resultado, data e resumo da ação. Senhas, hashes e tokens de sessão nunca fazem parte do registro. Alterações de usuários e seus eventos são confirmados na mesma transação SQLite.
+
 ## Verificações
 
 ```bash
@@ -84,7 +91,7 @@ $env:QA_NEW_PASSWORD="Senha definitiva QA 456"
 npm run qa:auth
 ```
 
-O teste confirma bloqueio anônimo das APIs, erro genérico para credenciais inválidas, troca obrigatória, proteções do cookie, acesso autenticado e logout. Use sempre um banco descartável: o roteiro troca definitivamente a senha da conta informada.
+O teste confirma bloqueio anônimo das APIs, erro genérico para credenciais inválidas, troca obrigatória, proteções do cookie, acesso autenticado, logout e seus respectivos eventos de auditoria. Use sempre um banco descartável: o roteiro troca definitivamente a senha da conta informada.
 
 Com um administrador de QA já usando senha definitiva, execute também o fluxo de gestão de usuários:
 
@@ -96,3 +103,22 @@ npm run qa:users
 ```
 
 Esse roteiro cria um Analista exclusivo, confirma a troca obrigatória de senha, bloqueia o acesso administrativo, desativa a conta, verifica a revogação da sessão e reativa o acesso. Use um banco descartável, pois o usuário de QA permanece cadastrado após o teste.
+
+Para validar a auditoria em um ambiente isolado e descartável:
+
+```powershell
+npm run qa:audit
+```
+
+O roteiro cria um banco SQLite temporário, prepara uma conta Administrador, escolhe uma porta livre, inicia a aplicação e remove o processo e os dados ao terminar. Ele verifica bloqueio anônimo e de Analistas, registro dos eventos, ausência de credenciais nas respostas e filtros da interface.
+
+Opcionalmente, é possível apontar o roteiro para uma aplicação que já esteja em execução:
+
+```powershell
+$env:QA_BASE_URL="http://localhost:3000"
+$env:QA_EMAIL="admin.qa@upa.local"
+$env:QA_PASSWORD="Senha definitiva QA 456"
+npm run qa:audit
+```
+
+Nesse modo externo, o servidor precisa estar acessível e o banco deve ser descartável, pois uma conta de teste e eventos permanentes serão criados. Se `QA_BASE_URL` não estiver definida, o modo isolado é usado automaticamente.

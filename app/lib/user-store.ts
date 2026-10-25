@@ -37,6 +37,12 @@ type StoredUserRow = {
   deactivated_at: string | null;
 };
 
+type PreparedPasswordChange = {
+  current: StoredUserRow;
+  passwordHash: string;
+  updatedAt: string;
+};
+
 export type UserStoreErrorCode =
   | "email_invalido"
   | "nome_invalido"
@@ -174,7 +180,34 @@ export class UserStore {
     return this.insert(prepared);
   }
 
+  async createAtomically<T>(
+    input: CreateUserInput,
+    afterCreate: (account: UserAccount) => T,
+  ): Promise<{ account: UserAccount; result: T }> {
+    const prepared = await this.prepareUser(input);
+    return this.runTransaction(() => {
+      const account = this.insert(prepared);
+      return { account, result: afterCreate(account) };
+    });
+  }
+
   async changePassword(userId: string, newPassword: string): Promise<UserAccount> {
+    return this.applyPasswordChange(await this.preparePasswordChange(userId, newPassword));
+  }
+
+  async changePasswordAtomically<T>(
+    userId: string,
+    newPassword: string,
+    afterChange: (account: UserAccount) => T,
+  ): Promise<{ account: UserAccount; result: T }> {
+    const prepared = await this.preparePasswordChange(userId, newPassword);
+    return this.runTransaction(() => {
+      const account = this.applyPasswordChange(prepared);
+      return { account, result: afterChange(account) };
+    });
+  }
+
+  private async preparePasswordChange(userId: string, newPassword: string): Promise<PreparedPasswordChange> {
     const current = this.database.prepare(`
       SELECT ${USER_COLUMNS}
       FROM users
@@ -190,11 +223,15 @@ export class UserStore {
 
     const passwordHash = await hashPassword(newPassword);
     const updatedAt = new Date().toISOString();
+    return { current, passwordHash, updatedAt };
+  }
+
+  private applyPasswordChange({ current, passwordHash, updatedAt }: PreparedPasswordChange): UserAccount {
     const result = this.database.prepare(`
       UPDATE users
       SET password_hash = ?, must_change_password = 0, updated_at = ?
       WHERE id = ? AND is_active = 1
-    `).run(passwordHash, updatedAt, userId);
+    `).run(passwordHash, updatedAt, current.id);
 
     if (result.changes !== 1) {
       throw new UserStoreError("usuario_indisponivel", "A conta não está disponível.");
@@ -231,22 +268,15 @@ export class UserStore {
 
   async createFirstAdministrator(input: Omit<CreateUserInput, "role">): Promise<UserAccount> {
     const prepared = await this.prepareUser({ ...input, role: "administrador" });
-    this.database.exec("BEGIN IMMEDIATE;");
-
-    try {
+    return this.runTransaction(() => {
       if (this.count() > 0) {
         throw new UserStoreError(
           "bootstrap_indisponivel",
           "O primeiro administrador só pode ser criado quando ainda não existem usuários.",
         );
       }
-      const account = this.insert(prepared);
-      this.database.exec("COMMIT;");
-      return account;
-    } catch (error) {
-      this.database.exec("ROLLBACK;");
-      throw error;
-    }
+      return this.insert(prepared);
+    });
   }
 
   private async prepareUser(input: CreateUserInput): Promise<StoredUserRow> {
@@ -298,5 +328,17 @@ export class UserStore {
     }
 
     return mapAccount(user);
+  }
+
+  private runTransaction<T>(work: () => T): T {
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      const result = work();
+      this.database.exec("COMMIT;");
+      return result;
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
   }
 }

@@ -58,6 +58,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { logout } from "./actions/auth";
+import { AdminAudit } from "./components/admin-audit";
 import { AdminUsers } from "./components/admin-users";
 import { Brand } from "./components/brand";
 import {
@@ -1338,7 +1339,7 @@ function Admin({ currentUser }: { currentUser: CurrentUser }) {
           {section === "users" && <AdminUsers currentUserId={currentUser.id} />}
           {section === "mapping" && <AdminPlaceholder icon={DatabaseIcon} title="Mapeamentos do Notion" description="Associe propriedades lógicas, categorias derivadas e registros excluídos sem alterar a fonte operacional." action="Revisar mapeamentos" />}
           {section === "health" && <AdminPlaceholder icon={ActivityIcon} title="Saúde da instalação" description="SQLite, espaço em disco, serviço Docker, certificado local e conectividade com a API." action="Executar diagnóstico" />}
-          {section === "audit" && <AdminPlaceholder icon={ListChecksIcon} title="Log de auditoria" description="Publicações, sincronizações, exportações, usuários e revelações de identidade registradas." action="Exportar auditoria" />}
+          {section === "audit" && <AdminAudit />}
         </section>
       </div>
     </div>

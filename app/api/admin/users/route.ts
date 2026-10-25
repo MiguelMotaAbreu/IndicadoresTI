@@ -1,3 +1,4 @@
+import { AuditStore } from "@/app/lib/audit-store";
 import { getApplicationDatabase } from "@/app/lib/database";
 import { generateTemporaryPassword, PasswordPolicyError } from "@/app/lib/passwords";
 import { getCurrentSession } from "@/app/lib/request-session";
@@ -22,16 +23,12 @@ async function authorizeAdministrator() {
   return { session } as const;
 }
 
-function userStore(): UserStore {
-  return new UserStore(getApplicationDatabase().connection);
-}
-
 export async function GET() {
   const authorization = await authorizeAdministrator();
   if ("response" in authorization) return authorization.response;
 
   try {
-    return noStoreJson({ ok: true, users: userStore().list() });
+    return noStoreJson({ ok: true, users: new UserStore(getApplicationDatabase().connection).list() });
   } catch {
     return noStoreJson({ ok: false, error: "Não foi possível consultar os usuários." }, { status: 503 });
   }
@@ -63,13 +60,29 @@ export async function POST(request: Request) {
   const payload = parsedPayload as { displayName?: unknown; email?: unknown; role?: unknown };
 
   const temporaryPassword = generateTemporaryPassword();
+  const database = getApplicationDatabase().connection;
   try {
-    const user = await userStore().create({
-      displayName: typeof payload.displayName === "string" ? payload.displayName : "",
-      email: typeof payload.email === "string" ? payload.email : "",
-      role: payload.role as UserRole,
-      temporaryPassword,
-    });
+    const { account: user } = await new UserStore(database).createAtomically(
+      {
+        displayName: typeof payload.displayName === "string" ? payload.displayName : "",
+        email: typeof payload.email === "string" ? payload.email : "",
+        role: payload.role as UserRole,
+        temporaryPassword,
+      },
+      (createdUser) => new AuditStore(database).append({
+        actor: {
+          userId: authorization.session.user.id,
+          displayName: authorization.session.user.displayName,
+          role: authorization.session.user.role,
+        },
+        action: "user.created",
+        targetType: "account",
+        targetId: createdUser.id,
+        targetLabel: createdUser.email,
+        outcome: "success",
+        summary: `Conta ${createdUser.role === "administrador" ? "Administrador" : "Analista"} criada.`,
+      }),
+    );
     return noStoreJson({ ok: true, user, temporaryPassword }, { status: 201 });
   } catch (error) {
     if (error instanceof UserStoreError) {

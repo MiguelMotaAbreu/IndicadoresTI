@@ -1,3 +1,4 @@
+import { AuditStore } from "@/app/lib/audit-store";
 import { getApplicationDatabase } from "@/app/lib/database";
 import { getCurrentSession } from "@/app/lib/request-session";
 import { SessionStore } from "@/app/lib/session-store";
@@ -58,6 +59,19 @@ export async function PATCH(
   try {
     const user = new UserStore(database).setActiveStatus(userId, payload.isActive);
     if (!payload.isActive) new SessionStore(database).revokeAllForUser(userId);
+    new AuditStore(database).append({
+      actor: {
+        userId: session.user.id,
+        displayName: session.user.displayName,
+        role: session.user.role,
+      },
+      action: payload.isActive ? "user.reactivated" : "user.deactivated",
+      targetType: "account",
+      targetId: user.id,
+      targetLabel: user.email,
+      outcome: "success",
+      summary: payload.isActive ? "Conta reativada." : "Conta desativada e sessões revogadas.",
+    });
     database.exec("COMMIT;");
     return noStoreJson({ ok: true, user });
   } catch (error) {

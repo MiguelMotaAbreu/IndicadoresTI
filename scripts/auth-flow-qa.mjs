@@ -64,7 +64,15 @@ try {
   await page.getByRole("button", { name: "Entrar na plataforma" }).click();
   await page.getByRole("heading", { name: "Catálogo de painéis" }).waitFor();
 
-  process.stdout.write("QA concluído: login, troca obrigatória, cookie protegido, APIs e logout funcionam.\n");
+  const auditResponse = await context.request.get(`${baseUrl}/api/admin/audit?limit=200`);
+  if (!auditResponse.ok()) throw new Error("O fluxo de autenticação não pôde consultar sua auditoria.");
+  const auditPayload = await auditResponse.json();
+  const auditActions = new Set(auditPayload.events.map((event) => event.action));
+  for (const expectedAction of ["auth.login_failed", "auth.login_succeeded", "auth.password_changed", "auth.logout"]) {
+    if (!auditActions.has(expectedAction)) throw new Error(`O evento ${expectedAction} não foi registrado.`);
+  }
+
+  process.stdout.write("QA concluído: login, troca obrigatória, cookie protegido, APIs, logout e auditoria funcionam.\n");
 } finally {
   await browser.close();
 }
