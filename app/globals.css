@@ -480,20 +480,20 @@ td:first-child small { color: var(--ink-faint); font-size: 8px; }
 .preflight-diagnostic__summary b { color: var(--ink-faint); font-size: 7px; text-transform: uppercase; }
 .preflight-diagnostic__summary strong { color: var(--ink); font-size: 14px; }
 .preflight-diagnostic__summary small { color: var(--ink-faint); font-size: 7px; }
-.preflight-relationship { display: grid; grid-template-columns: minmax(180px, 0.65fr) minmax(0, 1.35fr); gap: 12px; border-top: 1px solid rgba(78, 121, 95, 0.2); padding-top: 11px; }
-.preflight-relationship > div, .preflight-coverage > div { display: grid; align-content: start; gap: 3px; }
-.preflight-relationship > div strong, .preflight-coverage > div strong { color: var(--ink); font-size: 9px; }
-.preflight-relationship > div small, .preflight-coverage > div small { color: var(--ink-faint); font-size: 8px; line-height: 1.5; }
-.preflight-relationship ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 0; padding: 0; list-style: none; }
+.preflight-relationship, .preflight-consistency { display: grid; grid-template-columns: minmax(180px, 0.65fr) minmax(0, 1.35fr); gap: 12px; border-top: 1px solid rgba(78, 121, 95, 0.2); padding-top: 11px; }
+.preflight-relationship > div, .preflight-consistency > div, .preflight-coverage > div { display: grid; align-content: start; gap: 3px; }
+.preflight-relationship > div strong, .preflight-consistency > div strong, .preflight-coverage > div strong { color: var(--ink); font-size: 9px; }
+.preflight-relationship > div small, .preflight-consistency > div small, .preflight-coverage > div small { color: var(--ink-faint); font-size: 8px; line-height: 1.5; }
+.preflight-relationship ul, .preflight-consistency ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 0; padding: 0; list-style: none; }
 .preflight-diagnostic__sources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .preflight-coverage { min-width: 0; display: grid; align-content: start; gap: 9px; border: 1px solid rgba(78, 121, 95, 0.2); border-radius: 10px; background: rgba(255, 255, 255, 0.55); padding: 10px; }
 .preflight-coverage ul { max-height: 210px; display: grid; gap: 5px; overflow: auto; margin: 0; padding: 0; list-style: none; }
-.preflight-relationship li, .preflight-coverage li { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 7px 9px; }
-.preflight-relationship li.has-warning, .preflight-coverage li.has-warning { border-color: #ead3ad; background: #fffaf0; }
-.preflight-relationship li span, .preflight-coverage li span { display: grid; gap: 2px; }
-.preflight-relationship li b, .preflight-coverage li b { color: var(--ink); font-size: 8px; }
-.preflight-relationship li small, .preflight-coverage li small { color: var(--ink-faint); font-size: 7px; }
-.preflight-relationship li em, .preflight-coverage li em { color: var(--green-700); font-size: 9px; font-style: normal; font-weight: 700; }
+.preflight-relationship li, .preflight-consistency li, .preflight-coverage li { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 7px 9px; }
+.preflight-relationship li.has-warning, .preflight-consistency li.has-warning, .preflight-coverage li.has-warning { border-color: #ead3ad; background: #fffaf0; }
+.preflight-relationship li span, .preflight-consistency li span, .preflight-coverage li span { display: grid; gap: 2px; }
+.preflight-relationship li b, .preflight-consistency li b, .preflight-coverage li b { color: var(--ink); font-size: 8px; }
+.preflight-relationship li small, .preflight-consistency li small, .preflight-coverage li small { color: var(--ink-faint); font-size: 7px; }
+.preflight-relationship li em, .preflight-consistency li em, .preflight-coverage li em { color: var(--green-700); font-size: 9px; font-style: normal; font-weight: 700; }
 .admin-mapping { display: grid; gap: 14px; }
 .mapping-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .mapping-overview > span { min-height: 76px; display: grid; grid-template-columns: 28px 1fr; grid-template-rows: auto auto auto; align-content: center; column-gap: 8px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-subtle); padding: 10px 12px; color: var(--green-700); }
@@ -655,8 +655,8 @@ td:first-child small { color: var(--ink-faint); font-size: 8px; }
   .sync-overview { grid-template-columns: 1fr; }
   .connection-diagnostic__sources { grid-template-columns: 1fr; }
   .preflight-diagnostic__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .preflight-relationship, .preflight-diagnostic__sources { grid-template-columns: 1fr; }
-  .preflight-relationship ul { grid-template-columns: 1fr; }
+  .preflight-relationship, .preflight-consistency, .preflight-diagnostic__sources { grid-template-columns: 1fr; }
+  .preflight-relationship ul, .preflight-consistency ul { grid-template-columns: 1fr; }
   .mapping-overview, .mapping-sources { grid-template-columns: 1fr; }
 }
 

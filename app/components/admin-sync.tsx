@@ -95,6 +95,16 @@ type PreflightDiagnostic = {
     eventCoveragePercent: number;
     ticketCoveragePercent: number;
   };
+  consistency: {
+    issueCount: number;
+    recordsAffected: number;
+    rules: Array<{
+      code: string;
+      label: string;
+      source: "tickets" | "history";
+      count: number;
+    }>;
+  };
 };
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
@@ -305,7 +315,7 @@ export function AdminSync() {
             <span><b>Chamados</b><strong>{preflightDiagnostic.tickets.eligibleRecords}</strong><small>{preflightDiagnostic.tickets.pagesRead} página(s) lida(s)</small></span>
             <span><b>Eventos</b><strong>{preflightDiagnostic.history.eligibleRecords}</strong><small>{preflightDiagnostic.history.pagesRead} página(s) lida(s)</small></span>
             <span className={preflightDiagnostic.relationship.unlinkedEvents ? "has-warning" : ""}><b>Eventos vinculados</b><strong>{preflightDiagnostic.relationship.linkedEvents}</strong><small>{preflightDiagnostic.relationship.unlinkedEvents} sem vínculo seguro</small></span>
-            <span className={preflightDiagnostic.warningCount ? "has-warning" : ""}><b>Alertas</b><strong>{preflightDiagnostic.warningCount}</strong><small>Ausências, vínculos e rejeições</small></span>
+            <span className={preflightDiagnostic.warningCount ? "has-warning" : ""}><b>Alertas</b><strong>{preflightDiagnostic.warningCount}</strong><small>Ausências, vínculos, cronologia e rejeições</small></span>
           </div>
           <div className="preflight-relationship">
             <div><strong>Integridade entre as bases</strong><small>Somente relações com um único page.id existente são consideradas seguras para indicadores históricos.</small></div>
@@ -314,6 +324,17 @@ export function AdminSync() {
               <li><span><b>Chamados com histórico</b><small>{preflightDiagnostic.relationship.distinctLinkedTickets} de {preflightDiagnostic.tickets.eligibleRecords}</small></span><em>{preflightDiagnostic.relationship.ticketCoveragePercent.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</em></li>
               <li className={preflightDiagnostic.relationship.missingRelationEvents ? "has-warning" : ""}><span><b>Relação ausente</b><small>Eventos sem chamado relacionado</small></span><em>{preflightDiagnostic.relationship.missingRelationEvents}</em></li>
               <li className={preflightDiagnostic.relationship.orphanEvents || preflightDiagnostic.relationship.ambiguousEvents ? "has-warning" : ""}><span><b>Órfãos ou ambíguos</b><small>{preflightDiagnostic.relationship.orphanEvents} órfão(s) · {preflightDiagnostic.relationship.ambiguousEvents} ambíguo(s)</small></span><em>{preflightDiagnostic.relationship.orphanEvents + preflightDiagnostic.relationship.ambiguousEvents}</em></li>
+            </ul>
+          </div>
+          <div className="preflight-consistency">
+            <div><strong>Consistência cronológica</strong><small>{preflightDiagnostic.consistency.issueCount} ocorrência(s) em {preflightDiagnostic.consistency.recordsAffected} registro(s). Ausências são tratadas na cobertura e não como inversão de horário.</small></div>
+            <ul>
+              {preflightDiagnostic.consistency.rules.map((rule) => (
+                <li key={rule.code} className={rule.count ? "has-warning" : ""}>
+                  <span><b>{rule.label}</b><small>{rule.source === "tickets" ? "Base de chamados" : "Base de histórico"}</small></span>
+                  <em>{rule.count}</em>
+                </li>
+              ))}
             </ul>
           </div>
           <div className="preflight-diagnostic__sources">

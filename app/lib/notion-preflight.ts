@@ -1,7 +1,8 @@
 import type { NotionPageRecord, NotionReadClient, NotionSourceKey } from "./notion-client.ts";
+import { analyzeNotionConsistency, type NotionConsistencyResult } from "./notion-consistency.ts";
 import type { IngestionNotionMapping } from "./notion-mapping-store.ts";
 import { notionMappingFields, type NotionMappingField } from "./notion-mapping.ts";
-import { decodeMappedNotionProperty } from "./notion-value-normalizer.ts";
+import { normalizeNotionRecords, type NormalizedNotionRecord } from "./notion-record-transformer.ts";
 
 export type NotionPreflightErrorCode = "mapping_incomplete" | "mapping_outdated";
 
@@ -53,21 +54,11 @@ export type NotionPreflightResult = {
   tickets: SourcePreflightResult;
   history: SourcePreflightResult;
   relationship: PreflightRelationshipResult;
+  consistency: NotionConsistencyResult;
 };
 
 type PreflightClient = Pick<NotionReadClient, "loadSchema" | "queryDataSource">;
-type UnknownRecord = Record<string, unknown>;
 type MappedField = { mapping: IngestionNotionMapping; definition: NotionMappingField };
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function findProperty(page: NotionPageRecord, propertyId: string): unknown {
-  return Object.values(page.properties).find((property) => (
-    isRecord(property) && property.id === propertyId
-  ));
-}
 
 function validateMappingsAgainstSchema(
   mappings: readonly IngestionNotionMapping[],
@@ -134,12 +125,16 @@ function analyzeSource(
   rawPages: readonly NotionPageRecord[],
   requestCount: number,
   mappedFields: readonly MappedField[],
-): SourcePreflightResult & { uniquePages: NotionPageRecord[] } {
+  source: NotionSourceKey,
+): SourcePreflightResult & { records: NormalizedNotionRecord[] } {
   const unique = uniquePages(rawPages);
+  const records = normalizeNotionRecords(
+    unique.pages,
+    mappedFields.map(({ mapping }) => mapping),
+    source,
+  );
   const fields = mappedFields.map(({ mapping, definition }) => {
-    const states = unique.pages.map((page) => (
-      decodeMappedNotionProperty(findProperty(page, mapping.propertyId), mapping).state
-    ));
+    const states = records.map((record) => record.fields[mapping.fieldKey]?.state ?? "missing");
     const validCount = states.filter((state) => state === "valid").length;
     const invalidCount = states.filter((state) => state === "invalid").length;
     const missingCount = states.filter((state) => state === "missing").length;
@@ -165,45 +160,40 @@ function analyzeSource(
     warningCount: unique.rejectedRecords + fieldWarnings,
     requestCount,
     fields,
-    uniquePages: unique.pages,
+    records,
   };
 }
 
-function relationDetails(value: unknown): { ids: string[]; hasMore: boolean } {
-  if (!isRecord(value) || value.type !== "relation" || !Array.isArray(value.relation)) {
-    return { ids: [], hasMore: false };
-  }
-  const ids = [...new Set(value.relation.flatMap((item) => (
-    isRecord(item) && typeof item.id === "string" && item.id.trim().length > 0
-      ? [item.id.trim()]
-      : []
-  )))];
-  return { ids, hasMore: value.has_more === true };
-}
-
 function analyzeRelationships(
-  ticketPages: readonly NotionPageRecord[],
-  historyPages: readonly NotionPageRecord[],
-  relationPropertyId: string,
+  ticketRecords: readonly NormalizedNotionRecord[],
+  historyRecords: readonly NormalizedNotionRecord[],
 ): PreflightRelationshipResult {
-  const ticketIds = new Set(ticketPages.map((page) => page.id));
+  const ticketIds = new Set(ticketRecords.map((record) => record.pageId));
   const linkedTicketIds = new Set<string>();
   let linkedEvents = 0;
   let missingRelationEvents = 0;
   let orphanEvents = 0;
   let ambiguousEvents = 0;
 
-  for (const page of historyPages) {
-    const relation = relationDetails(findProperty(page, relationPropertyId));
-    if (relation.hasMore || relation.ids.length > 1) {
+  for (const record of historyRecords) {
+    const relation = record.fields["history.ticketRelation"];
+    if (relation?.state === "invalid") {
       ambiguousEvents += 1;
       continue;
     }
-    if (relation.ids.length === 0) {
+    if (relation?.state !== "valid" || relation.value.kind !== "ids") {
       missingRelationEvents += 1;
       continue;
     }
-    const ticketId = relation.ids[0];
+    if (relation.value.truncated || relation.value.value.length > 1) {
+      ambiguousEvents += 1;
+      continue;
+    }
+    const ticketId = relation.value.value[0];
+    if (!ticketId) {
+      missingRelationEvents += 1;
+      continue;
+    }
     if (!ticketIds.has(ticketId)) {
       orphanEvents += 1;
       continue;
@@ -220,8 +210,8 @@ function analyzeRelationships(
     ambiguousEvents,
     unlinkedEvents,
     distinctLinkedTickets: linkedTicketIds.size,
-    eventCoveragePercent: coveragePercent(linkedEvents, historyPages.length),
-    ticketCoveragePercent: coveragePercent(linkedTicketIds.size, ticketPages.length),
+    eventCoveragePercent: coveragePercent(linkedEvents, historyRecords.length),
+    ticketCoveragePercent: coveragePercent(linkedTicketIds.size, ticketRecords.length),
   };
 }
 
@@ -246,19 +236,19 @@ export async function runNotionPreflight(
     client.queryDataSource(ticketSchema.dataSourceId, ticketMappings.map(({ mapping }) => mapping.propertyId)),
     client.queryDataSource(historySchema.dataSourceId, historyMappings.map(({ mapping }) => mapping.propertyId)),
   ]);
-  const tickets = analyzeSource(ticketQuery.pages, ticketQuery.requestCount, ticketMappings);
-  const history = analyzeSource(historyQuery.pages, historyQuery.requestCount, historyMappings);
+  const tickets = analyzeSource(ticketQuery.pages, ticketQuery.requestCount, ticketMappings, "tickets");
+  const history = analyzeSource(historyQuery.pages, historyQuery.requestCount, historyMappings, "history");
   const relationship = analyzeRelationships(
-    tickets.uniquePages,
-    history.uniquePages,
-    relationMapping.mapping.propertyId,
+    tickets.records,
+    history.records,
   );
+  const consistency = analyzeNotionConsistency(tickets.records, history.records);
   const relationshipWarnings = relationship.orphanEvents + relationship.ambiguousEvents;
 
   return {
     checkedAt: now().toISOString(),
     requestCount: tickets.requestCount + history.requestCount,
-    warningCount: tickets.warningCount + history.warningCount + relationshipWarnings,
+    warningCount: tickets.warningCount + history.warningCount + relationshipWarnings + consistency.issueCount,
     tickets: {
       pagesRead: tickets.pagesRead,
       eligibleRecords: tickets.eligibleRecords,
@@ -276,5 +266,6 @@ export async function runNotionPreflight(
       fields: history.fields,
     },
     relationship,
+    consistency,
   };
 }

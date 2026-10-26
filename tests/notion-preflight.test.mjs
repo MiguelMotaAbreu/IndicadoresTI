@@ -127,6 +127,25 @@ test("mantém chamado sem código elegível e mede os vínculos sem expor valore
   assert.equal(JSON.stringify(result).includes("event-one"), false);
 });
 
+test("inclui inconsistência cronológica no diagnóstico sem expor os registros afetados", async () => {
+  const result = await runNotionPreflight(clientFor({
+    tickets: [ticketPage("ticket-one")],
+    history: [historyPage("event-one", ["ticket-one"], {
+      "Data e hora": { id: "occurred", type: "date", date: { start: "2026-10-25T09:00:00-03:00", end: null, time_zone: null } },
+    })],
+  }), mappings);
+
+  assert.equal(result.consistency.issueCount, 1);
+  assert.equal(result.consistency.recordsAffected, 1);
+  assert.equal(
+    result.consistency.rules.find((rule) => rule.code === "history_event_before_ticket_opened").count,
+    1,
+  );
+  assert.equal(result.warningCount, 1);
+  assert.equal(JSON.stringify(result).includes("ticket-one"), false);
+  assert.equal(JSON.stringify(result).includes("event-one"), false);
+});
+
 test("separa valor inválido de campo vazio e reduz a cobertura sem expor o conteúdo", async () => {
   const result = await runNotionPreflight(clientFor({
     tickets: [
