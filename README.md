@@ -94,7 +94,9 @@ $env:PULSETI_NOTION_HISTORY_DATABASE_ID="id-da-base-de-historico"
 
 Com as três variáveis configuradas, o botão **Testar conexão** faz consultas somente leitura usando a versão `2026-03-11` da API do Notion. O diagnóstico verifica o acesso às duas bases, resolve a fonte de dados de cada base e apresenta apenas nome, quantidade e tipos das propriedades. Tokens, IDs internos e mensagens brutas do serviço não são devolvidos ao navegador nem registrados na auditoria.
 
-Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explícita, pois escolher silenciosamente uma fonte poderia associar indicadores ao esquema errado. A execução manual permanece bloqueada enquanto a orquestração do conector é construída; a camada de persistência já aceita apenas registros normalizados e mapeados, sem descrições livres ou anexos.
+Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explícita, pois escolher silenciosamente uma fonte poderia associar indicadores ao esquema errado. Com configuração e mapeamentos obrigatórios completos, **Sincronizar agora** registra uma execução e responde imediatamente; a leitura, validação e publicação continuam em segundo plano. A interface acompanha o estado até a conclusão, e somente registros normalizados e mapeados entram no snapshot, sem descrições livres ou anexos.
+
+O trabalho em segundo plano usa `after()` do Next.js e possui limite de cinco minutos por execução. Em hospedagem própria, o processo deve receber desligamento gracioso por `SIGINT` ou `SIGTERM` e aguardar as tarefas pendentes antes de encerrar; uma janela de drenagem entre 10 e 30 segundos evita interromper uma carga durante deploys ou reinicializações.
 
 ### Mapeamento das propriedades
 

@@ -239,6 +239,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousAudit.status() !== 401) throw new Error("A auditoria aceitou uma consulta anônima.");
     const anonymousSync = await anonymousContext.request.get(`${baseUrl}/api/admin/sync`);
     if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
+    const anonymousSyncStart = await anonymousContext.request.post(`${baseUrl}/api/admin/sync`);
+    if (anonymousSyncStart.status() !== 401) throw new Error("A execução da sincronização aceitou uma solicitação anônima.");
     const anonymousConnectionTest = await anonymousContext.request.post(`${baseUrl}/api/admin/sync/connection`);
     if (anonymousConnectionTest.status() !== 401) throw new Error("O teste de conexão aceitou uma solicitação anônima.");
     const anonymousMapping = await anonymousContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
@@ -279,6 +281,8 @@ async function runAuditFlow(baseUrl) {
       if (forbiddenAudit.status() !== 403) throw new Error("Uma conta Analista consultou a auditoria.");
       const forbiddenSync = await analystContext.request.get(`${baseUrl}/api/admin/sync`);
       if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
+      const forbiddenSyncStart = await analystContext.request.post(`${baseUrl}/api/admin/sync`);
+      if (forbiddenSyncStart.status() !== 403) throw new Error("Uma conta Analista iniciou uma sincronização.");
       const forbiddenConnectionTest = await analystContext.request.post(`${baseUrl}/api/admin/sync/connection`);
       if (forbiddenConnectionTest.status() !== 403) throw new Error("Uma conta Analista testou a conexão com o Notion.");
       const forbiddenMapping = await analystContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
@@ -310,6 +314,10 @@ async function runAuditFlow(baseUrl) {
       if (missingPreflight.status() !== 409) {
         throw new Error("A pré-validação não recusou uma configuração incompleta.");
       }
+      const missingSyncStart = await administratorContext.request.post(`${baseUrl}/api/admin/sync`);
+      if (missingSyncStart.status() !== 409) {
+        throw new Error("A sincronização não recusou uma configuração incompleta.");
+      }
     }
 
     const auditResponse = await administratorContext.request.get(`${baseUrl}/api/admin/audit?limit=200`);
@@ -317,7 +325,7 @@ async function runAuditFlow(baseUrl) {
     const auditPayload = await auditResponse.json();
     const actions = new Set(auditPayload.events.map((event) => event.action));
     const expectedActions = ["auth.login_failed", "auth.login_succeeded", "user.created", "user.deactivated", "user.reactivated"];
-    if (!externalBaseUrl) expectedActions.push("sync.connection_tested", "sync.preflight_completed");
+    if (!externalBaseUrl) expectedActions.push("sync.connection_tested", "sync.preflight_completed", "sync.run_completed");
     for (const expectedAction of expectedActions) {
       if (!actions.has(expectedAction)) throw new Error(`O evento ${expectedAction} não foi registrado.`);
     }
@@ -357,6 +365,9 @@ async function runAuditFlow(baseUrl) {
     if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Pré-validar bases" }).isDisabled())) {
       throw new Error("A interface liberou a pré-validação sem configuração completa.");
     }
+    if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Sincronizar agora" }).isDisabled())) {
+      throw new Error("A interface liberou a sincronização sem configuração completa.");
+    }
     await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();
     await administratorPage.getByRole("heading", { name: "Mapeamentos do Notion" }).waitFor();
     await administratorPage.getByText("Nenhum mapeamento salvo", { exact: true }).waitFor();
@@ -371,13 +382,14 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByLabel("Categoria").selectOption("sync");
       await administratorPage.getByText("Conexão com o Notion testada", { exact: true }).first().waitFor();
       await administratorPage.getByText("Pré-validação do Notion concluída", { exact: true }).first().waitFor();
+      await administratorPage.getByText("Sincronização do Notion concluída", { exact: true }).first().waitFor();
     }
 
     await administratorPage.getByLabel("Categoria").selectOption("auth");
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: auditoria, autorização, mapeamentos e proteção da pré-validação funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, mapeamentos e proteção da sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

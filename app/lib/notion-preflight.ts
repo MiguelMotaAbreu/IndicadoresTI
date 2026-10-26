@@ -57,12 +57,20 @@ export type NotionPreflightResult = {
   consistency: NotionConsistencyResult;
 };
 
-type PreflightClient = Pick<NotionReadClient, "loadSchema" | "queryDataSource">;
+export type PreparedNotionDataset = {
+  diagnostic: NotionPreflightResult;
+  records: {
+    tickets: NormalizedNotionRecord[];
+    history: NormalizedNotionRecord[];
+  };
+};
+
+export type NotionPreflightClient = Pick<NotionReadClient, "loadSchema" | "queryDataSource">;
 type MappedField = { mapping: IngestionNotionMapping; definition: NotionMappingField };
 
 function validateMappingsAgainstSchema(
   mappings: readonly IngestionNotionMapping[],
-  schemas: Awaited<ReturnType<PreflightClient["loadSchema"]>>,
+  schemas: Awaited<ReturnType<NotionPreflightClient["loadSchema"]>>,
 ): void {
   const definitions = new Map(notionMappingFields.map((field) => [field.key, field]));
   const mappedKeys = new Set(mappings.map((mapping) => mapping.fieldKey));
@@ -215,11 +223,11 @@ function analyzeRelationships(
   };
 }
 
-export async function runNotionPreflight(
-  client: PreflightClient,
+export async function prepareNotionDataset(
+  client: NotionPreflightClient,
   mappings: readonly IngestionNotionMapping[],
   now = () => new Date(),
-): Promise<NotionPreflightResult> {
+): Promise<PreparedNotionDataset> {
   const schemas = await client.loadSchema();
   validateMappingsAgainstSchema(mappings, schemas);
 
@@ -245,7 +253,7 @@ export async function runNotionPreflight(
   const consistency = analyzeNotionConsistency(tickets.records, history.records);
   const relationshipWarnings = relationship.orphanEvents + relationship.ambiguousEvents;
 
-  return {
+  const diagnostic: NotionPreflightResult = {
     checkedAt: now().toISOString(),
     requestCount: tickets.requestCount + history.requestCount,
     warningCount: tickets.warningCount + history.warningCount + relationshipWarnings + consistency.issueCount,
@@ -268,4 +276,19 @@ export async function runNotionPreflight(
     relationship,
     consistency,
   };
+  return {
+    diagnostic,
+    records: {
+      tickets: tickets.records,
+      history: history.records,
+    },
+  };
+}
+
+export async function runNotionPreflight(
+  client: NotionPreflightClient,
+  mappings: readonly IngestionNotionMapping[],
+  now = () => new Date(),
+): Promise<NotionPreflightResult> {
+  return (await prepareNotionDataset(client, mappings, now)).diagnostic;
 }

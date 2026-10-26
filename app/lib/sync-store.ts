@@ -292,7 +292,12 @@ export class SyncStore {
     }
   }
 
-  publish(runId: string, dataset: SnapshotDataset, publishedAt = new Date()): AnalyticalSnapshot {
+  publish(
+    runId: string,
+    dataset: SnapshotDataset,
+    publishedAt = new Date(),
+    afterPublish?: (snapshot: AnalyticalSnapshot) => void,
+  ): AnalyticalSnapshot {
     const tickets = prepareRecords(dataset.tickets, "tickets");
     const history = prepareRecords(dataset.history, "history");
     if (tickets.length === 0) {
@@ -350,8 +355,10 @@ export class SyncStore {
         counts.warningCount,
         runId,
       );
+      const publishedSnapshot = mapSnapshot(snapshot);
+      afterPublish?.(publishedSnapshot);
       this.database.exec("COMMIT;");
-      return mapSnapshot(snapshot);
+      return publishedSnapshot;
     } catch (error) {
       this.database.exec("ROLLBACK;");
       throw error;
@@ -376,19 +383,34 @@ export class SyncStore {
     }));
   }
 
-  fail(runId: string, code: string, message: string, finishedAt = new Date()): SyncRun {
+  fail(
+    runId: string,
+    code: string,
+    message: string,
+    finishedAt = new Date(),
+    afterFail?: (run: SyncRun) => void,
+  ): SyncRun {
     const failure = normalizeError(code, message);
-    const row = this.database.prepare(`
-      UPDATE sync_runs
-      SET status = 'failed', finished_at = ?, error_code = ?, error_message = ?
-      WHERE id = ? AND status = 'running'
-      RETURNING ${SYNC_RUN_COLUMNS}
-    `).get(finishedAt.toISOString(), failure.code, failure.message, runId) as SyncRunRow | undefined;
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.database.prepare(`
+        UPDATE sync_runs
+        SET status = 'failed', finished_at = ?, error_code = ?, error_message = ?
+        WHERE id = ? AND status = 'running'
+        RETURNING ${SYNC_RUN_COLUMNS}
+      `).get(finishedAt.toISOString(), failure.code, failure.message, runId) as SyncRunRow | undefined;
 
-    if (!row) {
-      throw new SyncStoreError("run_unavailable", "A execução de sincronização não está disponível para registrar falha.");
+      if (!row) {
+        throw new SyncStoreError("run_unavailable", "A execução de sincronização não está disponível para registrar falha.");
+      }
+      const failedRun = mapRun(row);
+      afterFail?.(failedRun);
+      this.database.exec("COMMIT;");
+      return failedRun;
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
     }
-    return mapRun(row);
   }
 
   overview(limit = 10): SyncOverview {

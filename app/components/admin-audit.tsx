@@ -19,7 +19,8 @@ type AuditAction =
   | "user.reactivated"
   | "sync.connection_tested"
   | "sync.mapping_saved"
-  | "sync.preflight_completed";
+  | "sync.preflight_completed"
+  | "sync.run_completed";
 
 type AuditEvent = {
   id: string;
@@ -44,6 +45,7 @@ const actionLabels: Record<AuditAction, string> = {
   "sync.connection_tested": "Conexão com o Notion testada",
   "sync.mapping_saved": "Mapeamento do Notion salvo",
   "sync.preflight_completed": "Pré-validação do Notion concluída",
+  "sync.run_completed": "Sincronização do Notion concluída",
 };
 
 async function fetchAuditEvents(signal?: AbortSignal): Promise<AuditEvent[]> {

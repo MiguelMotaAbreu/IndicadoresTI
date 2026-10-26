@@ -13,7 +13,8 @@ export type AuditAction =
   | "user.reactivated"
   | "sync.connection_tested"
   | "sync.mapping_saved"
-  | "sync.preflight_completed";
+  | "sync.preflight_completed"
+  | "sync.run_completed";
 
 export type AuditOutcome = "success" | "failure";
 

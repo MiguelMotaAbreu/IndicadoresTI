@@ -208,3 +208,31 @@ test("reverte metadados e registros quando a persistência da nova carga falha",
     closeContext(context);
   }
 });
+
+test("mantém publicação e auditoria na mesma transação", () => {
+  const context = testContext();
+  try {
+    const firstRun = context.store.start(context.actor);
+    const published = context.store.publish(firstRun.id, dataset());
+    const secondRun = context.store.start(context.actor);
+
+    assert.throws(
+      () => context.store.publish(
+        secondRun.id,
+        dataset({ tickets: [ticket("ticket-two")] }),
+        new Date("2026-10-26T16:00:00.000Z"),
+        () => { throw new Error("auditoria indisponível"); },
+      ),
+      /auditoria indisponível/,
+    );
+
+    assert.equal(context.store.overview().latestSnapshot?.id, published.id);
+    assert.equal(context.store.overview().activeRun?.id, secondRun.id);
+    assert.equal(
+      context.database.connection.prepare("SELECT COUNT(*) AS total FROM analytical_snapshots").get().total,
+      1,
+    );
+  } finally {
+    closeContext(context);
+  }
+});
