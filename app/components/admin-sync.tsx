@@ -42,7 +42,7 @@ type SyncResponse = {
     requiredTotal: number;
     ready: boolean;
   };
-  capabilities: { canPreflight: boolean; canStart: boolean; blockedReason: string };
+  capabilities: { canPreflight: boolean; canStart: boolean; canRecover: boolean; blockedReason: string };
   activeRun: SyncRun | null;
   latestSnapshot: (SnapshotCounts & { id: string; publishedAt: string }) | null;
   recentRuns: SyncRun[];
@@ -188,6 +188,22 @@ async function startNotionSync(): Promise<SyncRun> {
   return payload.run as SyncRun;
 }
 
+async function recoverInterruptedSync(): Promise<SyncRun> {
+  const response = await fetch("/api/admin/sync/recovery", {
+    method: "POST",
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null) as unknown;
+  const isObject = typeof payload === "object" && payload !== null;
+  const errorMessage = isObject && "error" in payload && typeof payload.error === "string"
+    ? payload.error
+    : null;
+  if (!response.ok || !isObject || !("ok" in payload) || payload.ok !== true || !("run" in payload)) {
+    throw new Error(errorMessage ?? "Não foi possível encerrar a execução interrompida.");
+  }
+  return payload.run as SyncRun;
+}
+
 export function AdminSync() {
   const [state, setState] = useState<SyncResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,6 +215,7 @@ export function AdminSync() {
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [preflightDiagnostic, setPreflightDiagnostic] = useState<PreflightDiagnostic | null>(null);
   const [startingSync, setStartingSync] = useState(false);
+  const [recoveringSync, setRecoveringSync] = useState(false);
   const [syncActionError, setSyncActionError] = useState<string | null>(null);
 
   async function refresh(signal?: AbortSignal) {
@@ -257,6 +274,7 @@ export function AdminSync() {
         capabilities: {
           canPreflight: current.capabilities.canPreflight,
           canStart: false,
+          canRecover: false,
           blockedReason: "Já existe uma sincronização em andamento.",
         },
       } : current);
@@ -264,6 +282,19 @@ export function AdminSync() {
       setSyncActionError(syncFailure instanceof Error ? syncFailure.message : "Não foi possível iniciar a sincronização.");
     } finally {
       setStartingSync(false);
+    }
+  }
+
+  async function recoverSync() {
+    setRecoveringSync(true);
+    setSyncActionError(null);
+    try {
+      await recoverInterruptedSync();
+      setState(await loadSyncState());
+    } catch (recoveryFailure) {
+      setSyncActionError(recoveryFailure instanceof Error ? recoveryFailure.message : "Não foi possível encerrar a execução interrompida.");
+    } finally {
+      setRecoveringSync(false);
     }
   }
 
@@ -318,10 +349,14 @@ export function AdminSync() {
       <div className="admin-section-heading">
         <div><h2>Sincronização com o Notion</h2><p>A última carga íntegra permanece publicada enquanto uma nova carga é preparada e validada.</p></div>
         <div className="admin-sync__actions">
-          <button className="button button--ghost" disabled={loading || testingConnection || runningPreflight || startingSync} onClick={() => void refresh()}><ArrowsClockwiseIcon className={loading ? "spin" : ""} size={16} />Atualizar estado</button>
-          <button className="button button--ghost" disabled={loading || runningPreflight || startingSync || Boolean(state?.activeRun) || !state?.configuration.ready || testingConnection} onClick={() => void runConnectionTest()} title={state?.configuration.ready ? "Valida acesso e esquema sem importar registros." : "Complete a configuração do Notion para testar."}><CloudCheckIcon size={17} />{testingConnection ? "Testando..." : "Testar conexão"}</button>
-          <button className="button button--ghost" disabled={loading || testingConnection || runningPreflight || startingSync || Boolean(state?.activeRun) || !state?.capabilities.canPreflight} onClick={() => void runPreflight()} title={state?.capabilities.canPreflight ? "Lê chamados e histórico sem publicar uma carga." : state?.capabilities.blockedReason ?? "Carregando disponibilidade."}><ArrowsClockwiseIcon className={runningPreflight ? "spin" : ""} size={17} />{runningPreflight ? "Pré-validando..." : "Pré-validar bases"}</button>
-          <button className="button button--primary" disabled={loading || testingConnection || runningPreflight || startingSync || !state?.capabilities.canStart} onClick={() => void runSync()} title={state?.capabilities.canStart ? "Importa, valida e publica uma nova carga em segundo plano." : state?.capabilities.blockedReason ?? "Carregando disponibilidade."}><CloudArrowDownIcon className={startingSync || state?.activeRun ? "spin" : ""} size={17} />{startingSync ? "Iniciando..." : state?.activeRun ? "Sincronizando..." : "Sincronizar agora"}</button>
+          <button className="button button--ghost" disabled={loading || testingConnection || runningPreflight || startingSync || recoveringSync} onClick={() => void refresh()}><ArrowsClockwiseIcon className={loading ? "spin" : ""} size={16} />Atualizar estado</button>
+          <button className="button button--ghost" disabled={loading || runningPreflight || startingSync || recoveringSync || Boolean(state?.activeRun) || !state?.configuration.ready || testingConnection} onClick={() => void runConnectionTest()} title={state?.configuration.ready ? "Valida acesso e esquema sem importar registros." : "Complete a configuração do Notion para testar."}><CloudCheckIcon size={17} />{testingConnection ? "Testando..." : "Testar conexão"}</button>
+          <button className="button button--ghost" disabled={loading || testingConnection || runningPreflight || startingSync || recoveringSync || Boolean(state?.activeRun) || !state?.capabilities.canPreflight} onClick={() => void runPreflight()} title={state?.capabilities.canPreflight ? "Lê chamados e histórico sem publicar uma carga." : state?.capabilities.blockedReason ?? "Carregando disponibilidade."}><ArrowsClockwiseIcon className={runningPreflight ? "spin" : ""} size={17} />{runningPreflight ? "Pré-validando..." : "Pré-validar bases"}</button>
+          {state?.capabilities.canRecover ? (
+            <button className="button button--primary" disabled={loading || recoveringSync} onClick={() => void recoverSync()} title="Marca o job interrompido como falho e libera uma nova tentativa sem alterar o snapshot publicado."><WarningCircleIcon size={17} />{recoveringSync ? "Encerrando..." : "Encerrar execução"}</button>
+          ) : (
+            <button className="button button--primary" disabled={loading || testingConnection || runningPreflight || startingSync || recoveringSync || !state?.capabilities.canStart} onClick={() => void runSync()} title={state?.capabilities.canStart ? "Importa, valida e publica uma nova carga em segundo plano." : state?.capabilities.blockedReason ?? "Carregando disponibilidade."}><CloudArrowDownIcon className={startingSync || state?.activeRun ? "spin" : ""} size={17} />{startingSync ? "Iniciando..." : state?.activeRun ? "Sincronizando..." : "Sincronizar agora"}</button>
+          )}
         </div>
       </div>
 
@@ -348,7 +383,7 @@ export function AdminSync() {
         </span>
       </div>
 
-      {state?.activeRun && <div className="sync-progress"><span><b>Sincronização iniciada por {state.activeRun.requestedBy.displayName}</b><small>A carga anterior continua disponível durante o processamento.</small></span><i><b /></i></div>}
+      {state?.activeRun && <div className="sync-progress"><span><b>{state.capabilities.canRecover ? "Execução possivelmente interrompida" : `Sincronização iniciada por ${state.activeRun.requestedBy.displayName}`}</b><small>{state.capabilities.canRecover ? "Encerre o job para liberar uma nova tentativa. O snapshot anterior permanece disponível." : "A carga anterior continua disponível durante o processamento."}</small></span>{!state.capabilities.canRecover && <i><b /></i>}</div>}
 
       {connectionError && <div className="admin-users__error" role="alert"><WarningCircleIcon size={18} weight="fill" /><span>{connectionError}</span></div>}
       {preflightError && <div className="admin-users__error" role="alert"><WarningCircleIcon size={18} weight="fill" /><span>{preflightError}</span></div>}

@@ -98,6 +98,8 @@ Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explíci
 
 O trabalho em segundo plano usa `after()` do Next.js e possui limite de cinco minutos por execução. Em hospedagem própria, o processo deve receber desligamento gracioso por `SIGINT` ou `SIGTERM` e aguardar as tarefas pendentes antes de encerrar; uma janela de drenagem entre 10 e 30 segundos evita interromper uma carga durante deploys ou reinicializações.
 
+Se uma execução permanecer em `running` por pelo menos 15 minutos, a Administração passa a classificá-la como possivelmente interrompida e oferece **Encerrar execução**. A ação não tenta importar novamente: ela marca somente o job como `failed`, registra a recuperação na auditoria na mesma transação e preserva integralmente o último snapshot publicado. Uma nova sincronização continua dependendo de uma ação explícita do Administrador, evitando duas leituras concorrentes do Notion.
+
 ### Mapeamento das propriedades
 
 Em **Administração > Mapeamentos**, o Administrador pode consultar o esquema atual das duas fontes e associar suas propriedades aos 21 campos conhecidos pela camada analítica. Oito campos estruturais são obrigatórios; os opcionais aumentam a cobertura de indicadores de tempo, SLA, agendamento, responsáveis e privacidade.

@@ -7,7 +7,7 @@ import { notionMappingFields } from "@/app/lib/notion-mapping";
 import { NotionMappingStore } from "@/app/lib/notion-mapping-store";
 import { executeNotionSync } from "@/app/lib/notion-sync";
 import { getCurrentSession } from "@/app/lib/request-session";
-import { SyncStore, SyncStoreError } from "@/app/lib/sync-store";
+import { isSyncRunStale, SyncStore, SyncStoreError } from "@/app/lib/sync-store";
 
 export const maxDuration = 300;
 
@@ -54,12 +54,15 @@ export async function GET() {
     const database = getApplicationDatabase().connection;
     const overview = new SyncStore(database).overview(10);
     const mapping = mappingState(database).overview;
+    const canRecover = isSyncRunStale(overview.activeRun);
     const blockedReason = !configuration.ready
       ? `Configuração pendente: ${configuration.missing.join(", ")}.`
       : !mapping.ready
         ? `Mapeamento obrigatório pendente: ${mapping.requiredMapped} de ${mapping.requiredTotal} campos configurados.`
         : overview.activeRun
-          ? "Já existe uma sincronização em andamento."
+          ? canRecover
+            ? "A execução ultrapassou o limite seguro e pode ser encerrada para liberar uma nova tentativa."
+            : "Já existe uma sincronização em andamento."
           : "Configuração e mapeamentos prontos para sincronizar.";
 
     return noStoreJson({
@@ -69,6 +72,7 @@ export async function GET() {
       capabilities: {
         canPreflight: configuration.ready && mapping.ready,
         canStart: configuration.ready && mapping.ready && !overview.activeRun,
+        canRecover,
         blockedReason,
       },
       ...overview,

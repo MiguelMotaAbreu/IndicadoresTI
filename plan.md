@@ -46,6 +46,7 @@ O usuário pode reorganizar essa composição, restaurar o arranjo inicial do pa
 - Notion permanece como fonte oficial.
 - Integração somente leitura com as bases de chamados e histórico.
 - Sincronização manual, executada como job em segundo plano e acompanhada pela interface até sucesso ou falha.
+- Jobs que permaneçam em execução além do limite seguro podem ser encerrados explicitamente por um Administrador; a recuperação é auditada, preserva o último snapshot íntegro e não dispara repetição automática.
 - Antes da primeira publicação, uma pré-validação somente leitura percorre chamados e histórico, confirma a paginação integral, converte somente os campos mapeados para registros canônicos em memória, separa valores ausentes de valores incompatíveis com o tipo analítico, calcula a cobertura válida, mede vínculos ausentes, órfãos ou ambíguos e detecta inversões cronológicas entre abertura, início, conclusão e etapas sem persistir valores operacionais.
 - Nova carga só é publicada após ser integralmente concluída e validada.
 - Cada snapshot persiste os registros canônicos tipados de chamados e histórico pelo `page.id`; suas contagens são derivadas daquilo que foi gravado na mesma transação.

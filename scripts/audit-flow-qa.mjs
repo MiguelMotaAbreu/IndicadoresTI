@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { chromium } from "@playwright/test";
 
 import { ApplicationDatabase } from "../app/lib/database.ts";
+import { SYNC_STALE_AFTER_MS, SyncStore } from "../app/lib/sync-store.ts";
 import { UserStore } from "../app/lib/user-store.ts";
 
 const DEFAULT_ADMINISTRATOR_EMAIL = "admin.qa@upa.local";
@@ -22,6 +23,8 @@ const administratorPassword = externalBaseUrl
 
 let applicationProcess = null;
 let disposableDirectory = null;
+let disposableDatabasePath = null;
+let disposableAdministratorId = null;
 let applicationOutput = "";
 
 function hasProcessExited(childProcess) {
@@ -114,6 +117,7 @@ async function assertExternalApplicationIsReachable(baseUrl) {
 async function prepareDisposableApplication() {
   disposableDirectory = mkdtempSync(join(tmpdir(), "pulseti-audit-qa-"));
   const databasePath = join(disposableDirectory, "pulseti-qa.sqlite");
+  disposableDatabasePath = databasePath;
   const database = new ApplicationDatabase(databasePath);
 
   try {
@@ -124,6 +128,7 @@ async function prepareDisposableApplication() {
       role: "administrador",
       temporaryPassword: TEMPORARY_ADMINISTRATOR_PASSWORD,
     });
+    disposableAdministratorId = administrator.id;
     await users.changePassword(administrator.id, administratorPassword);
   } finally {
     database.close();
@@ -241,6 +246,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
     const anonymousSyncStart = await anonymousContext.request.post(`${baseUrl}/api/admin/sync`);
     if (anonymousSyncStart.status() !== 401) throw new Error("A execução da sincronização aceitou uma solicitação anônima.");
+    const anonymousSyncRecovery = await anonymousContext.request.post(`${baseUrl}/api/admin/sync/recovery`);
+    if (anonymousSyncRecovery.status() !== 401) throw new Error("A recuperação da sincronização aceitou uma solicitação anônima.");
     const anonymousConnectionTest = await anonymousContext.request.post(`${baseUrl}/api/admin/sync/connection`);
     if (anonymousConnectionTest.status() !== 401) throw new Error("O teste de conexão aceitou uma solicitação anônima.");
     const anonymousMapping = await anonymousContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
@@ -283,6 +290,8 @@ async function runAuditFlow(baseUrl) {
       if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
       const forbiddenSyncStart = await analystContext.request.post(`${baseUrl}/api/admin/sync`);
       if (forbiddenSyncStart.status() !== 403) throw new Error("Uma conta Analista iniciou uma sincronização.");
+      const forbiddenSyncRecovery = await analystContext.request.post(`${baseUrl}/api/admin/sync/recovery`);
+      if (forbiddenSyncRecovery.status() !== 403) throw new Error("Uma conta Analista recuperou uma sincronização.");
       const forbiddenConnectionTest = await analystContext.request.post(`${baseUrl}/api/admin/sync/connection`);
       if (forbiddenConnectionTest.status() !== 403) throw new Error("Uma conta Analista testou a conexão com o Notion.");
       const forbiddenMapping = await analystContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
@@ -318,6 +327,10 @@ async function runAuditFlow(baseUrl) {
       if (missingSyncStart.status() !== 409) {
         throw new Error("A sincronização não recusou uma configuração incompleta.");
       }
+      const missingActiveRunRecovery = await administratorContext.request.post(`${baseUrl}/api/admin/sync/recovery`);
+      if (missingActiveRunRecovery.status() !== 409) {
+        throw new Error("A recuperação não recusou a ausência de uma execução ativa.");
+      }
     }
 
     const auditResponse = await administratorContext.request.get(`${baseUrl}/api/admin/audit?limit=200`);
@@ -339,6 +352,9 @@ async function runAuditFlow(baseUrl) {
     const syncPayload = await syncResponse.json();
     if (syncPayload.latestSnapshot !== null || syncPayload.capabilities?.canStart !== false) {
       throw new Error("O estado inicial da sincronização não corresponde ao banco descartável.");
+    }
+    if (syncPayload.capabilities?.canRecover !== false) {
+      throw new Error("O estado inicial ofereceu recuperação sem uma execução interrompida.");
     }
     if (syncPayload.mapping?.requiredMapped !== 0 || syncPayload.mapping?.ready !== false) {
       throw new Error("O estado inicial dos mapeamentos não corresponde ao banco descartável.");
@@ -368,6 +384,29 @@ async function runAuditFlow(baseUrl) {
     if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Sincronizar agora" }).isDisabled())) {
       throw new Error("A interface liberou a sincronização sem configuração completa.");
     }
+    if (await administratorPage.getByRole("button", { name: "Encerrar execução" }).count()) {
+      throw new Error("A interface ofereceu recuperação sem uma execução interrompida.");
+    }
+    if (!externalBaseUrl) {
+      if (!disposableDatabasePath || !disposableAdministratorId) {
+        throw new Error("O banco descartável não foi preparado para testar a recuperação.");
+      }
+      const recoveryDatabase = new ApplicationDatabase(disposableDatabasePath);
+      try {
+        new SyncStore(recoveryDatabase.connection).start(
+          { userId: disposableAdministratorId, displayName: "Administrador QA" },
+          new Date(Date.now() - SYNC_STALE_AFTER_MS - 1_000),
+        );
+      } finally {
+        recoveryDatabase.close();
+      }
+
+      await administratorPage.getByRole("button", { name: "Atualizar estado" }).click();
+      await administratorPage.getByText("Execução possivelmente interrompida", { exact: true }).waitFor();
+      await administratorPage.getByRole("button", { name: "Encerrar execução" }).click();
+      await administratorPage.getByRole("button", { name: "Sincronizar agora" }).waitFor();
+      await administratorPage.getByText("Falhou", { exact: true }).first().waitFor();
+    }
     await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();
     await administratorPage.getByRole("heading", { name: "Mapeamentos do Notion" }).waitFor();
     await administratorPage.getByText("Nenhum mapeamento salvo", { exact: true }).waitFor();
@@ -383,13 +422,14 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByText("Conexão com o Notion testada", { exact: true }).first().waitFor();
       await administratorPage.getByText("Pré-validação do Notion concluída", { exact: true }).first().waitFor();
       await administratorPage.getByText("Sincronização do Notion concluída", { exact: true }).first().waitFor();
+      await administratorPage.getByText("Execução interrompida encerrada", { exact: true }).first().waitFor();
     }
 
     await administratorPage.getByLabel("Categoria").selectOption("auth");
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: auditoria, autorização, mapeamentos e proteção da sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, mapeamentos, proteção e recuperação da sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

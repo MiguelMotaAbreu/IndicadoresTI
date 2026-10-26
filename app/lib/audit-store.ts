@@ -14,7 +14,8 @@ export type AuditAction =
   | "sync.connection_tested"
   | "sync.mapping_saved"
   | "sync.preflight_completed"
-  | "sync.run_completed";
+  | "sync.run_completed"
+  | "sync.run_recovered";
 
 export type AuditOutcome = "success" | "failure";
 

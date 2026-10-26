@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ApplicationDatabase } from "../app/lib/database.ts";
-import { SyncStore, SyncStoreError } from "../app/lib/sync-store.ts";
+import {
+  isSyncRunStale,
+  SYNC_STALE_AFTER_MS,
+  SyncStore,
+  SyncStoreError,
+} from "../app/lib/sync-store.ts";
 
 function testContext() {
   const directory = mkdtempSync(join(tmpdir(), "pulseti-sync-store-"));
@@ -232,6 +237,78 @@ test("mantém publicação e auditoria na mesma transação", () => {
       context.database.connection.prepare("SELECT COUNT(*) AS total FROM analytical_snapshots").get().total,
       1,
     );
+  } finally {
+    closeContext(context);
+  }
+});
+
+test("classifica uma execução como interrompida somente após o limite seguro", () => {
+  const startedAt = new Date("2026-10-26T10:00:00.000Z");
+  const run = {
+    id: "sync-boundary",
+    requestedBy: { userId: "admin-sync", displayName: "Administrador Sincronização" },
+    status: "running",
+    startedAt: startedAt.toISOString(),
+    finishedAt: null,
+    counts: null,
+    error: null,
+  };
+
+  assert.equal(isSyncRunStale(run, new Date(startedAt.getTime() + SYNC_STALE_AFTER_MS - 1)), false);
+  assert.equal(isSyncRunStale(run, new Date(startedAt.getTime() + SYNC_STALE_AFTER_MS)), true);
+  assert.equal(isSyncRunStale({ ...run, status: "failed" }, new Date("2026-10-27T10:00:00.000Z")), false);
+  assert.equal(isSyncRunStale(null), false);
+});
+
+test("recupera somente execução interrompida, preserva o snapshot e mantém auditoria atômica", () => {
+  const context = testContext();
+  try {
+    const publishedRun = context.store.start(context.actor, new Date("2026-10-26T09:00:00.000Z"));
+    const published = context.store.publish(
+      publishedRun.id,
+      dataset({ tickets: [ticket("ticket-published")] }),
+      new Date("2026-10-26T09:05:00.000Z"),
+    );
+    const interrupted = context.store.start(context.actor, new Date("2026-10-26T10:00:00.000Z"));
+
+    assert.throws(
+      () => context.store.recoverInterrupted(
+        interrupted.id,
+        new Date("2026-10-26T09:59:59.999Z"),
+        new Date("2026-10-26T10:10:00.000Z"),
+      ),
+      (error) => error instanceof SyncStoreError && error.code === "run_not_recoverable",
+    );
+    assert.equal(context.store.overview().activeRun?.id, interrupted.id);
+
+    assert.throws(
+      () => context.store.recoverInterrupted(
+        interrupted.id,
+        new Date("2026-10-26T10:00:00.000Z"),
+        new Date("2026-10-26T10:15:00.000Z"),
+        () => { throw new Error("auditoria indisponível"); },
+      ),
+      /auditoria indisponível/,
+    );
+    assert.equal(context.store.overview().activeRun?.id, interrupted.id);
+
+    let auditedRunId = null;
+    const recovered = context.store.recoverInterrupted(
+      interrupted.id,
+      new Date("2026-10-26T10:00:00.000Z"),
+      new Date("2026-10-26T10:15:01.000Z"),
+      (run) => { auditedRunId = run.id; },
+    );
+
+    assert.equal(recovered.status, "failed");
+    assert.equal(recovered.error?.code, "sync_interrupted");
+    assert.equal(auditedRunId, interrupted.id);
+    assert.equal(context.store.overview().activeRun, null);
+    assert.equal(context.store.overview().latestSnapshot?.id, published.id);
+    assert.equal(context.store.recordsForSnapshot(published.id, "tickets").length, 1);
+
+    const retry = context.store.start(context.actor, new Date("2026-10-26T10:16:00.000Z"));
+    assert.equal(retry.status, "running");
   } finally {
     closeContext(context);
   }

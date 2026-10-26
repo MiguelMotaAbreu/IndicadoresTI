@@ -5,6 +5,7 @@ import type { NormalizedNotionRecord } from "./notion-record-transformer.ts";
 
 export type SyncRunStatus = "running" | "succeeded" | "failed";
 export type SnapshotStatus = "published" | "superseded";
+export const SYNC_STALE_AFTER_MS = 15 * 60 * 1_000;
 
 export type SyncActor = {
   userId: string;
@@ -50,6 +51,7 @@ export type SyncOverview = {
 export type SyncStoreErrorCode =
   | "sync_in_progress"
   | "run_unavailable"
+  | "run_not_recoverable"
   | "invalid_counts"
   | "invalid_records"
   | "invalid_error";
@@ -264,6 +266,12 @@ function isRunningConstraintError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("sync_runs_one_running_idx");
 }
 
+export function isSyncRunStale(run: SyncRun | null, now = new Date()): boolean {
+  if (!run || run.status !== "running") return false;
+  const startedAt = Date.parse(run.startedAt);
+  return !Number.isNaN(startedAt) && now.getTime() - startedAt >= SYNC_STALE_AFTER_MS;
+}
+
 export class SyncStore {
   private readonly database: DatabaseSync;
 
@@ -407,6 +415,45 @@ export class SyncStore {
       afterFail?.(failedRun);
       this.database.exec("COMMIT;");
       return failedRun;
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  recoverInterrupted(
+    runId: string,
+    staleBefore: Date,
+    recoveredAt = new Date(),
+    afterRecover?: (run: SyncRun) => void,
+  ): SyncRun {
+    const errorCode = "sync_interrupted";
+    const errorMessage = "A execução foi encerrada porque permaneceu em andamento além do limite de recuperação.";
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.database.prepare(`
+        UPDATE sync_runs
+        SET status = 'failed', finished_at = ?, error_code = ?, error_message = ?
+        WHERE id = ? AND status = 'running' AND started_at <= ?
+        RETURNING ${SYNC_RUN_COLUMNS}
+      `).get(
+        recoveredAt.toISOString(),
+        errorCode,
+        errorMessage,
+        runId,
+        staleBefore.toISOString(),
+      ) as SyncRunRow | undefined;
+
+      if (!row) {
+        throw new SyncStoreError(
+          "run_not_recoverable",
+          "A execução não está interrompida ou ainda não atingiu o limite seguro de recuperação.",
+        );
+      }
+      const recoveredRun = mapRun(row);
+      afterRecover?.(recoveredRun);
+      this.database.exec("COMMIT;");
+      return recoveredRun;
     } catch (error) {
       this.database.exec("ROLLBACK;");
       throw error;
