@@ -219,6 +219,7 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .widget__actions { display: flex; align-items: center; gap: 7px; }
 .drag-grip { color: var(--green-700); }
 .widget__actions button { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: white; cursor: pointer; color: var(--ink-soft); }
+.widget__actions button:disabled { cursor: not-allowed; opacity: 0.45; }
 .widget__actions button.widget-action--danger { border-color: #efd3d5; color: var(--red); }
 .widget__actions button.widget-action--danger:hover { border-color: #d99da1; background: #fff4f4; }
 .coverage-badge, .sample-badge { border-radius: 99px; background: var(--green-50); color: var(--green-700); padding: 4px 7px; font-size: 7.5px; font-weight: 700; }
@@ -237,7 +238,13 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .legend-list button { min-width: 0; height: 18px; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 5px; border: 0; background: transparent; cursor: pointer; color: var(--ink-soft); padding: 0 3px; font-size: 7px; text-align: left; }
 .legend-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legend-list button:hover { background: var(--surface-subtle); }
+.legend-list button:disabled { cursor: default; opacity: 1; }
 .legend-list b { color: var(--ink); }
+.analytical-widget-state { width: 100%; height: 100%; min-height: 90px; display: grid; place-items: center; align-content: center; gap: 5px; color: var(--ink-faint); text-align: center; }
+.analytical-widget-state svg { color: var(--green-700); }
+.analytical-widget-state strong { color: var(--ink); font-size: 10px; }
+.analytical-widget-state span { max-width: 320px; font-size: 8px; line-height: 1.45; }
+.analytical-widget-state--error svg { color: var(--red); }
 .custom-widget-state { height: 100%; display: grid; place-items: center; align-content: center; gap: 7px; color: var(--green-700); text-align: center; }
 .custom-widget-state strong { color: var(--ink); font-size: 11px; }
 .custom-widget-state strong.custom-widget-state__value { color: var(--green-800); font-size: 24px; letter-spacing: -0.8px; }

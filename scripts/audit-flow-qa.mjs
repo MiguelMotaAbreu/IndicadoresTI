@@ -398,6 +398,16 @@ async function runAuditFlow(baseUrl) {
       throw new Error("A visão geral não representou corretamente a ausência de snapshot no banco descartável.");
     }
 
+    await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
+    await administratorPage.getByRole("heading", { name: "Visão geral" }).waitFor();
+    await administratorPage.getByText("Aguardando primeiro snapshot", { exact: true }).first().waitFor();
+    if (!(await administratorPage.getByRole("button", { name: "Filtros" }).isDisabled())) {
+      throw new Error("A Visão geral liberou filtros antes de conectá-los ao modelo analítico.");
+    }
+    if (!(await administratorPage.getByRole("button", { name: "Indicador", exact: true }).isDisabled())) {
+      throw new Error("A Visão geral liberou métricas personalizadas ainda baseadas em demonstração.");
+    }
+
     await administratorPage.getByRole("button", { name: "Administração" }).click();
     await administratorPage.getByRole("heading", { name: "Sincronização com o Notion" }).waitFor();
     await administratorPage.getByText("Nenhuma carga publicada", { exact: true }).waitFor();
@@ -507,7 +517,23 @@ async function runAuditFlow(baseUrl) {
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: auditoria, autorização, saúde, visão analítica, mapeamentos e sincronização funcionam.\n");
+    if (!externalBaseUrl) {
+      await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
+      await administratorPage.getByRole("heading", { name: "Visão geral" }).waitFor();
+      const metricCards = administratorPage.locator(".metric-card");
+      await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
+      await metricCards.filter({ hasText: "Média por dia" }).getByText("1", { exact: true }).waitFor();
+      await metricCards.filter({ hasText: "Dentro do SLA avaliado" }).getByText("50%", { exact: true }).waitFor();
+      await metricCards.filter({ hasText: "Pendências atuais" }).getByText("1", { exact: true }).waitFor();
+      await administratorPage.getByText("Evolução da demanda", { exact: true }).waitFor();
+      await administratorPage.getByText("Distribuição por status", { exact: true }).waitFor();
+      await administratorPage.getByText("Base: 2", { exact: false }).waitFor();
+      if (await administratorPage.getByText("518", { exact: true }).count()) {
+        throw new Error("A Visão geral ainda exibiu o total demonstrativo após carregar o snapshot real.");
+      }
+    }
+
+    process.stdout.write("QA concluído: auditoria, autorização, saúde, Visão geral real, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

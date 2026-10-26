@@ -63,6 +63,8 @@ test("calcula a visão geral com dias corridos, cobertura e classificações reg
     validOpenings: 3,
     calendarDays: 3,
     coveragePercent: 75,
+    periodStart: "2026-10-01",
+    periodEnd: "2026-10-03",
   });
   assert.deepEqual(analytics.cards.slaCompliance, {
     valuePercent: 50,

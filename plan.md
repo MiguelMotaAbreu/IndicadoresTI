@@ -51,6 +51,7 @@ O usuário pode reorganizar essa composição, restaurar o arranjo inicial do pa
 - Nova carga só é publicada após ser integralmente concluída e validada.
 - Cada snapshot persiste os registros canônicos tipados de chamados e histórico pelo `page.id`; suas contagens são derivadas daquilo que foi gravado na mesma transação.
 - A leitura analítica da visão geral é calculada no servidor sobre o snapshot publicado, com total, média por dia corrido, SLA registrado, pendências, série temporal e distribuições; ausência de amostra produz valor nulo e cobertura explícita, nunca um número demonstrativo silencioso.
+- O painel Visão geral consome exclusivamente essa leitura real e apresenta estados explícitos de carregamento, vazio e falha; controles ainda não conectados ao snapshot permanecem bloqueados para não misturar resultados reais e demonstrativos.
 - Em caso de falha, permanece visível a última carga íntegra.
 - Registros removidos do Notion são preservados localmente como inativos e excluídos dos indicadores por padrão.
 - Correções de dados são feitas somente no Notion.

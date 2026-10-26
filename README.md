@@ -130,6 +130,8 @@ O endpoint autenticado `GET /api/analytics/overview` lê exclusivamente o snapsh
 
 Datas são agrupadas em `America/Sao_Paulo`; períodos de até 366 dias retornam pontos diários, enquanto intervalos maiores são consolidados por mês e limitados a 600 pontos. Ausências não viram zero silenciosamente: médias e SLA sem amostra retornam valor nulo, acompanhados da quantidade válida e da cobertura. Relações do Notion que contenham apenas IDs não são usadas como rótulos de gráficos. Quando ainda não existe snapshot, a API responde com sucesso e `data: null`, permitindo que a interface apresente um estado vazio sem fingir dados reais.
 
+O painel **Visão geral** consome esse modelo diretamente. Seus quatro cartões, evolução temporal e distribuições por status, prioridade e motivo deixam de usar os números demonstrativos assim que a tela é aberta. Sem snapshot, cada widget mostra um estado vazio explícito; falhas de leitura também não reaproveitam mocks. O catálogo deixou de afirmar uma contagem fixa. Filtros, cross-filter, detalhamento, exportação e prévias de métricas personalizadas ficam temporariamente bloqueados nesse painel até que também executem sobre o snapshot real.
+
 ## Verificações
 
 ```bash

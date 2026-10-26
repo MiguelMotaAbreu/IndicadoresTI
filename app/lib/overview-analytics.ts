@@ -19,6 +19,8 @@ export type OverviewAnalytics = {
       validOpenings: number;
       calendarDays: number;
       coveragePercent: number;
+      periodStart: string | null;
+      periodEnd: string | null;
     };
     slaCompliance: {
       valuePercent: number | null;
@@ -269,6 +271,8 @@ export function calculateOverviewAnalytics(
         validOpenings: openedKeys.length,
         calendarDays,
         coveragePercent: percentage(openedKeys.length, tickets.length),
+        periodStart: firstOpening,
+        periodEnd: lastOpening,
       },
       slaCompliance: classifySla(tickets),
       pendingTickets: classifyPending(tickets),
