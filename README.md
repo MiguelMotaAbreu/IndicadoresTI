@@ -124,6 +124,12 @@ O resultado informa páginas lidas, registros elegíveis por `page.id`, duplicid
 
 Ausências e valores inválidos aparecem separadamente; a cobertura considera somente valores que puderam ser normalizados para o tipo analítico esperado. Também cruza a relação do evento com os `page.id` dos chamados lidos: vínculos ausentes, apontando para chamados inexistentes ou contendo mais de um destino são separados e nunca tratados como seguros. A consistência cronológica verifica início ou conclusão anteriores à abertura, conclusão anterior ao início, fim de etapa anterior ao começo e movimentação anterior à abertura do chamado relacionado. Comparações que dependem de um campo ausente, inválido ou de uma relação ambígua são ignoradas, sem inventar uma inconsistência. O chamado não é descartado por estar sem código visível ou por possuir outro campo analítico vazio. Consultas truncadas pelo limite de 10.000 resultados do Notion são recusadas em vez de apresentadas como completas.
 
+### Modelo analítico da visão geral
+
+O endpoint autenticado `GET /api/analytics/overview` lê exclusivamente o snapshot atualmente publicado e produz o primeiro modelo de leitura real dos painéis. A resposta contém total de chamados, média por dia corrido, cumprimento e cobertura do SLA registrado, pendências atuais, evolução de aberturas e conclusões, além das distribuições por status, prioridade e motivo.
+
+Datas são agrupadas em `America/Sao_Paulo`; períodos de até 366 dias retornam pontos diários, enquanto intervalos maiores são consolidados por mês e limitados a 600 pontos. Ausências não viram zero silenciosamente: médias e SLA sem amostra retornam valor nulo, acompanhados da quantidade válida e da cobertura. Relações do Notion que contenham apenas IDs não são usadas como rótulos de gráficos. Quando ainda não existe snapshot, a API responde com sucesso e `data: null`, permitindo que a interface apresente um estado vazio sem fingir dados reais.
+
 ## Verificações
 
 ```bash

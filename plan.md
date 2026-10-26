@@ -50,6 +50,7 @@ O usuário pode reorganizar essa composição, restaurar o arranjo inicial do pa
 - Antes da primeira publicação, uma pré-validação somente leitura percorre chamados e histórico, confirma a paginação integral, converte somente os campos mapeados para registros canônicos em memória, separa valores ausentes de valores incompatíveis com o tipo analítico, calcula a cobertura válida, mede vínculos ausentes, órfãos ou ambíguos e detecta inversões cronológicas entre abertura, início, conclusão e etapas sem persistir valores operacionais.
 - Nova carga só é publicada após ser integralmente concluída e validada.
 - Cada snapshot persiste os registros canônicos tipados de chamados e histórico pelo `page.id`; suas contagens são derivadas daquilo que foi gravado na mesma transação.
+- A leitura analítica da visão geral é calculada no servidor sobre o snapshot publicado, com total, média por dia corrido, SLA registrado, pendências, série temporal e distribuições; ausência de amostra produz valor nulo e cobertura explícita, nunca um número demonstrativo silencioso.
 - Em caso de falha, permanece visível a última carga íntegra.
 - Registros removidos do Notion são preservados localmente como inativos e excluídos dos indicadores por padrão.
 - Correções de dados são feitas somente no Notion.

@@ -244,6 +244,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousAudit.status() !== 401) throw new Error("A auditoria aceitou uma consulta anônima.");
     const anonymousHealth = await anonymousContext.request.get(`${baseUrl}/api/admin/health`);
     if (anonymousHealth.status() !== 401) throw new Error("A saúde do sistema aceitou uma consulta anônima.");
+    const anonymousOverview = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview`);
+    if (anonymousOverview.status() !== 401) throw new Error("A visão geral analítica aceitou uma consulta anônima.");
     const anonymousSync = await anonymousContext.request.get(`${baseUrl}/api/admin/sync`);
     if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
     const anonymousSyncStart = await anonymousContext.request.post(`${baseUrl}/api/admin/sync`);
@@ -290,6 +292,8 @@ async function runAuditFlow(baseUrl) {
       if (forbiddenAudit.status() !== 403) throw new Error("Uma conta Analista consultou a auditoria.");
       const forbiddenHealth = await analystContext.request.get(`${baseUrl}/api/admin/health`);
       if (forbiddenHealth.status() !== 403) throw new Error("Uma conta Analista consultou a saúde do sistema.");
+      const analystOverviewBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview`);
+      if (analystOverviewBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a visão geral analítica.");
       const forbiddenSync = await analystContext.request.get(`${baseUrl}/api/admin/sync`);
       if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
       const forbiddenSyncStart = await analystContext.request.post(`${baseUrl}/api/admin/sync`);
@@ -387,6 +391,13 @@ async function runAuditFlow(baseUrl) {
       throw new Error("O diagnóstico da instalação expôs uma credencial do Notion.");
     }
 
+    const overviewResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview`);
+    if (!overviewResponse.ok()) throw new Error("A conta autenticada não conseguiu consultar a visão geral analítica.");
+    const overviewPayload = await overviewResponse.json();
+    if (overviewPayload.data !== null || overviewPayload.reason !== "no_snapshot") {
+      throw new Error("A visão geral não representou corretamente a ausência de snapshot no banco descartável.");
+    }
+
     await administratorPage.getByRole("button", { name: "Administração" }).click();
     await administratorPage.getByRole("heading", { name: "Sincronização com o Notion" }).waitFor();
     await administratorPage.getByText("Nenhuma carga publicada", { exact: true }).waitFor();
@@ -409,7 +420,40 @@ async function runAuditFlow(baseUrl) {
       }
       const recoveryDatabase = new ApplicationDatabase(disposableDatabasePath);
       try {
-        new SyncStore(recoveryDatabase.connection).start(
+        const recoveryStore = new SyncStore(recoveryDatabase.connection);
+        const publishedRun = recoveryStore.start(
+          { userId: disposableAdministratorId, displayName: "Administrador QA" },
+          new Date(Date.now() - SYNC_STALE_AFTER_MS - 120_000),
+        );
+        recoveryStore.publish(publishedRun.id, {
+          tickets: [
+            {
+              source: "tickets",
+              pageId: "qa-ticket-one",
+              fields: {
+                "ticket.openedAt": { state: "valid", value: { kind: "date", value: "2026-10-01T10:00:00-03:00" } },
+                "ticket.status": { state: "valid", value: { kind: "text", value: "Concluído" } },
+                "ticket.priority": { state: "valid", value: { kind: "text", value: "Alta" } },
+                "ticket.reason": { state: "valid", value: { kind: "text", value: "Impressora" } },
+                "ticket.slaStatus": { state: "valid", value: { kind: "text", value: "Dentro do prazo" } },
+              },
+            },
+            {
+              source: "tickets",
+              pageId: "qa-ticket-two",
+              fields: {
+                "ticket.openedAt": { state: "valid", value: { kind: "date", value: "2026-10-02T10:00:00-03:00" } },
+                "ticket.status": { state: "valid", value: { kind: "text", value: "Aguardando informação" } },
+                "ticket.priority": { state: "valid", value: { kind: "text", value: "Média" } },
+                "ticket.reason": { state: "valid", value: { kind: "text", value: "Computador" } },
+                "ticket.slaStatus": { state: "valid", value: { kind: "text", value: "Fora do prazo" } },
+              },
+            },
+          ],
+          history: [],
+          warningCount: 0,
+        });
+        recoveryStore.start(
           { userId: disposableAdministratorId, displayName: "Administrador QA" },
           new Date(Date.now() - SYNC_STALE_AFTER_MS - 1_000),
         );
@@ -422,6 +466,18 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByRole("button", { name: "Encerrar execução" }).click();
       await administratorPage.getByRole("button", { name: "Sincronizar agora" }).waitFor();
       await administratorPage.getByText("Falhou", { exact: true }).first().waitFor();
+
+      const publishedOverviewResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview`);
+      if (!publishedOverviewResponse.ok()) throw new Error("A visão geral não conseguiu ler o snapshot descartável publicado.");
+      const publishedOverview = await publishedOverviewResponse.json();
+      if (
+        publishedOverview.data?.cards?.totalTickets !== 2
+        || publishedOverview.data?.cards?.averagePerCalendarDay?.value !== 1
+        || publishedOverview.data?.cards?.slaCompliance?.valuePercent !== 50
+        || publishedOverview.data?.cards?.pendingTickets?.value !== 1
+      ) {
+        throw new Error("A visão geral não calculou corretamente o snapshot descartável publicado.");
+      }
     }
     await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();
     await administratorPage.getByRole("heading", { name: "Mapeamentos do Notion" }).waitFor();
@@ -451,7 +507,7 @@ async function runAuditFlow(baseUrl) {
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: auditoria, autorização, saúde, mapeamentos, proteção e recuperação da sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, saúde, visão analítica, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();
