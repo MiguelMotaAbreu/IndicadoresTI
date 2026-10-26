@@ -60,10 +60,7 @@ type ConnectionDiagnostic = {
   }>;
 };
 
-type PreflightDiagnostic = {
-  ok: true;
-  source: "tickets";
-  checkedAt: string;
+type PreflightSourceDiagnostic = {
   pagesRead: number;
   eligibleRecords: number;
   rejectedRecords: number;
@@ -77,6 +74,25 @@ type PreflightDiagnostic = {
     missingCount: number;
     coveragePercent: number;
   }>;
+};
+
+type PreflightDiagnostic = {
+  ok: true;
+  checkedAt: string;
+  requestCount: number;
+  warningCount: number;
+  tickets: PreflightSourceDiagnostic;
+  history: PreflightSourceDiagnostic;
+  relationship: {
+    linkedEvents: number;
+    missingRelationEvents: number;
+    orphanEvents: number;
+    ambiguousEvents: number;
+    unlinkedEvents: number;
+    distinctLinkedTickets: number;
+    eventCoveragePercent: number;
+    ticketCoveragePercent: number;
+  };
 };
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
@@ -127,7 +143,7 @@ async function testNotionConnection(): Promise<ConnectionDiagnostic> {
   return payload as ConnectionDiagnostic;
 }
 
-async function preflightTickets(): Promise<PreflightDiagnostic> {
+async function preflightNotionSources(): Promise<PreflightDiagnostic> {
   const response = await fetch("/api/admin/sync/preflight", {
     method: "POST",
     cache: "no-store",
@@ -138,7 +154,7 @@ async function preflightTickets(): Promise<PreflightDiagnostic> {
     ? payload.error
     : null;
   if (!response.ok || !isObject || !("ok" in payload) || payload.ok !== true) {
-    throw new Error(errorMessage ?? "Não foi possível pré-validar os chamados.");
+    throw new Error(errorMessage ?? "Não foi possível pré-validar as bases do Notion.");
   }
   return payload as PreflightDiagnostic;
 }
@@ -189,9 +205,9 @@ export function AdminSync() {
     setPreflightError(null);
     setPreflightDiagnostic(null);
     try {
-      setPreflightDiagnostic(await preflightTickets());
+      setPreflightDiagnostic(await preflightNotionSources());
     } catch (preflightFailure) {
-      setPreflightError(preflightFailure instanceof Error ? preflightFailure.message : "Não foi possível pré-validar os chamados.");
+      setPreflightError(preflightFailure instanceof Error ? preflightFailure.message : "Não foi possível pré-validar as bases do Notion.");
     } finally {
       setRunningPreflight(false);
     }
@@ -228,7 +244,7 @@ export function AdminSync() {
         <div className="admin-sync__actions">
           <button className="button button--ghost" disabled={loading || testingConnection || runningPreflight} onClick={() => void refresh()}><ArrowsClockwiseIcon className={loading ? "spin" : ""} size={16} />Atualizar estado</button>
           <button className="button button--ghost" disabled={loading || runningPreflight || !state?.configuration.ready || testingConnection} onClick={() => void runConnectionTest()} title={state?.configuration.ready ? "Valida acesso e esquema sem importar registros." : "Complete a configuração do Notion para testar."}><CloudCheckIcon size={17} />{testingConnection ? "Testando..." : "Testar conexão"}</button>
-          <button className="button button--primary" disabled={loading || testingConnection || runningPreflight || !state?.capabilities.canPreflight} onClick={() => void runPreflight()} title={state?.capabilities.canPreflight ? "Lê os chamados sem publicar uma carga." : state?.capabilities.blockedReason ?? "Carregando disponibilidade."}><ArrowsClockwiseIcon className={runningPreflight ? "spin" : ""} size={17} />{runningPreflight ? "Pré-validando..." : "Pré-validar chamados"}</button>
+          <button className="button button--primary" disabled={loading || testingConnection || runningPreflight || !state?.capabilities.canPreflight} onClick={() => void runPreflight()} title={state?.capabilities.canPreflight ? "Lê chamados e histórico sem publicar uma carga." : state?.capabilities.blockedReason ?? "Carregando disponibilidade."}><ArrowsClockwiseIcon className={runningPreflight ? "spin" : ""} size={17} />{runningPreflight ? "Pré-validando..." : "Pré-validar bases"}</button>
         </div>
       </div>
 
@@ -281,24 +297,40 @@ export function AdminSync() {
         <section className="preflight-diagnostic" aria-live="polite">
           <header>
             <span><CheckCircleIcon size={20} weight="fill" /></span>
-            <div><strong>Pré-validação dos chamados concluída</strong><small>{formatDate(preflightDiagnostic.checkedAt)} · {preflightDiagnostic.requestCount} consulta(s) paginada(s)</small></div>
+            <div><strong>Pré-validação das bases concluída</strong><small>{formatDate(preflightDiagnostic.checkedAt)} · {preflightDiagnostic.requestCount} consulta(s) paginada(s)</small></div>
           </header>
           <div className="preflight-diagnostic__summary">
-            <span><b>Páginas lidas</b><strong>{preflightDiagnostic.pagesRead}</strong><small>Resposta integral da fonte</small></span>
-            <span><b>Elegíveis</b><strong>{preflightDiagnostic.eligibleRecords}</strong><small>Identificados por page.id</small></span>
-            <span className={preflightDiagnostic.rejectedRecords ? "has-warning" : ""}><b>Rejeitados</b><strong>{preflightDiagnostic.rejectedRecords}</strong><small>Duplicidades técnicas</small></span>
-            <span className={preflightDiagnostic.warningCount ? "has-warning" : ""}><b>Alertas</b><strong>{preflightDiagnostic.warningCount}</strong><small>Ausências obrigatórias e rejeições</small></span>
+            <span><b>Chamados</b><strong>{preflightDiagnostic.tickets.eligibleRecords}</strong><small>{preflightDiagnostic.tickets.pagesRead} página(s) lida(s)</small></span>
+            <span><b>Eventos</b><strong>{preflightDiagnostic.history.eligibleRecords}</strong><small>{preflightDiagnostic.history.pagesRead} página(s) lida(s)</small></span>
+            <span className={preflightDiagnostic.relationship.unlinkedEvents ? "has-warning" : ""}><b>Eventos vinculados</b><strong>{preflightDiagnostic.relationship.linkedEvents}</strong><small>{preflightDiagnostic.relationship.unlinkedEvents} sem vínculo seguro</small></span>
+            <span className={preflightDiagnostic.warningCount ? "has-warning" : ""}><b>Alertas</b><strong>{preflightDiagnostic.warningCount}</strong><small>Ausências, vínculos e rejeições</small></span>
           </div>
-          <div className="preflight-coverage">
-            <div><strong>Cobertura dos campos mapeados</strong><small>Campos vazios não descartam o chamado; afetam apenas os indicadores dependentes.</small></div>
+          <div className="preflight-relationship">
+            <div><strong>Integridade entre as bases</strong><small>Somente relações com um único page.id existente são consideradas seguras para indicadores históricos.</small></div>
             <ul>
-              {preflightDiagnostic.fields.map((field) => (
-                <li key={field.fieldKey} className={field.required && field.missingCount > 0 ? "has-warning" : ""}>
-                  <span><b>{field.label}</b><small>{field.required ? "Obrigatório" : "Opcional"} · {field.missingCount} ausente(s)</small></span>
-                  <em>{field.coveragePercent.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</em>
-                </li>
-              ))}
+              <li><span><b>Cobertura dos eventos</b><small>{preflightDiagnostic.relationship.linkedEvents} de {preflightDiagnostic.history.eligibleRecords}</small></span><em>{preflightDiagnostic.relationship.eventCoveragePercent.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</em></li>
+              <li><span><b>Chamados com histórico</b><small>{preflightDiagnostic.relationship.distinctLinkedTickets} de {preflightDiagnostic.tickets.eligibleRecords}</small></span><em>{preflightDiagnostic.relationship.ticketCoveragePercent.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</em></li>
+              <li className={preflightDiagnostic.relationship.missingRelationEvents ? "has-warning" : ""}><span><b>Relação ausente</b><small>Eventos sem chamado relacionado</small></span><em>{preflightDiagnostic.relationship.missingRelationEvents}</em></li>
+              <li className={preflightDiagnostic.relationship.orphanEvents || preflightDiagnostic.relationship.ambiguousEvents ? "has-warning" : ""}><span><b>Órfãos ou ambíguos</b><small>{preflightDiagnostic.relationship.orphanEvents} órfão(s) · {preflightDiagnostic.relationship.ambiguousEvents} ambíguo(s)</small></span><em>{preflightDiagnostic.relationship.orphanEvents + preflightDiagnostic.relationship.ambiguousEvents}</em></li>
             </ul>
+          </div>
+          <div className="preflight-diagnostic__sources">
+            {([
+              { key: "tickets", label: "Campos dos chamados", source: preflightDiagnostic.tickets },
+              { key: "history", label: "Campos do histórico", source: preflightDiagnostic.history },
+            ] as const).map(({ key, label, source }) => (
+              <div className="preflight-coverage" key={key}>
+                <div><strong>{label}</strong><small>{source.requestCount} consulta(s) · {source.rejectedRecords} duplicidade(s). Campos vazios afetam somente os indicadores dependentes.</small></div>
+                <ul>
+                  {source.fields.map((field) => (
+                    <li key={field.fieldKey} className={field.required && field.missingCount > 0 ? "has-warning" : ""}>
+                      <span><b>{field.label}</b><small>{field.required ? "Obrigatório" : "Opcional"} · {field.missingCount} ausente(s)</small></span>
+                      <em>{field.coveragePercent.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</em>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         </section>
       )}

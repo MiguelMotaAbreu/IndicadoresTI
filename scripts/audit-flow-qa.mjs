@@ -354,7 +354,7 @@ async function runAuditFlow(baseUrl) {
     if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Testar conexão" }).isDisabled())) {
       throw new Error("A interface liberou o teste de conexão sem configuração completa.");
     }
-    if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Pré-validar chamados" }).isDisabled())) {
+    if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Pré-validar bases" }).isDisabled())) {
       throw new Error("A interface liberou a pré-validação sem configuração completa.");
     }
     await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();

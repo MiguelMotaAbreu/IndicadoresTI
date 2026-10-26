@@ -106,11 +106,11 @@ Propriedades de fórmula são aceitas somente nos campos em que a base atual pod
 
 Cada registro de chamado será identificado internamente pelo `page.id` que acompanha toda página retornada pela API do Notion. O código visível é apenas uma referência opcional e sua ausência não descartará o chamado. A propriedade de título pode ser mapeada como solicitante, mas nunca será usada como chave. O motivo permanece como classificação analítica; descrições livres não são sincronizadas nem combinadas para formar identidade ou categoria no v1.
 
-### Pré-validação dos chamados
+### Pré-validação das bases
 
-Depois que a configuração e os oito campos obrigatórios estiverem completos, **Administração > Sincronização > Pré-validar chamados** percorre a fonte de chamados com paginação de 100 registros. A consulta solicita somente as propriedades mapeadas, não grava valores operacionais e não substitui o snapshot publicado.
+Depois que a configuração e os oito campos obrigatórios estiverem completos, **Administração > Sincronização > Pré-validar bases** percorre chamados e histórico com paginação de 100 registros. As duas consultas somente leitura são iniciadas em paralelo, solicitam apenas as propriedades mapeadas, não gravam valores operacionais e não substituem o snapshot publicado.
 
-O resultado informa páginas lidas, registros elegíveis por `page.id`, duplicidades técnicas, alertas e cobertura de cada campo. Valores ausentes reduzem apenas a cobertura dos indicadores dependentes; o chamado não é descartado por estar sem código visível ou por possuir outro campo analítico vazio. Consultas truncadas pelo limite de 10.000 resultados do Notion são recusadas em vez de apresentadas como completas.
+O resultado informa páginas lidas, registros elegíveis por `page.id`, duplicidades técnicas, alertas e cobertura dos campos em cada fonte. Também cruza a relação do evento com os `page.id` dos chamados lidos: vínculos ausentes, apontando para chamados inexistentes ou contendo mais de um destino são separados e nunca tratados como seguros. Valores ausentes reduzem apenas a cobertura dos indicadores dependentes; o chamado não é descartado por estar sem código visível ou por possuir outro campo analítico vazio. Consultas truncadas pelo limite de 10.000 resultados do Notion são recusadas em vez de apresentadas como completas.
 
 ## Verificações
 

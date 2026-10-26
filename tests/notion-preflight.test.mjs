@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NotionPreflightError, runTicketPreflight } from "../app/lib/notion-preflight.ts";
+import { NotionPreflightError, runNotionPreflight } from "../app/lib/notion-preflight.ts";
 
 const schemas = [
   {
@@ -66,57 +66,131 @@ function ticketPage(id, overrides = {}) {
   };
 }
 
-function clientFor(pages) {
+function historyPage(id, ticketIds, overrides = {}) {
   return {
-    async loadSchema() { return schemas; },
-    async queryDataSource(dataSourceId, propertyIds) {
-      assert.equal(dataSourceId, "tickets-source");
-      assert.equal(propertyIds.includes("requester"), true);
-      return { pages, requestCount: 2 };
+    id,
+    properties: {
+      Evento: { id: "event", type: "title", title: [{ plain_text: "Início" }] },
+      Chamado: {
+        id: "ticket-relation",
+        type: "relation",
+        relation: ticketIds.map((ticketId) => ({ id: ticketId })),
+        has_more: false,
+      },
+      "Data e hora": { id: "occurred", type: "date", date: { start: "2026-10-25T11:00:00-03:00", end: null, time_zone: null } },
+      ...overrides,
     },
   };
 }
 
-test("mantém chamado sem código visível elegível e calcula cobertura sem expor valores", async () => {
-  const result = await runTicketPreflight(
-    clientFor([ticketPage("notion-page-id")]),
+function clientFor({ tickets = [], history = [], ticketRequests = 2, historyRequests = 1 } = {}) {
+  return {
+    async loadSchema() { return schemas; },
+    async queryDataSource(dataSourceId, propertyIds) {
+      if (dataSourceId === "tickets-source") {
+        assert.equal(propertyIds.includes("requester"), true);
+        assert.equal(propertyIds.includes("ticket-relation"), false);
+        return { pages: tickets, requestCount: ticketRequests };
+      }
+      assert.equal(dataSourceId, "history-source");
+      assert.equal(propertyIds.includes("ticket-relation"), true);
+      assert.equal(propertyIds.includes("requester"), false);
+      return { pages: history, requestCount: historyRequests };
+    },
+  };
+}
+
+test("mantém chamado sem código elegível e mede os vínculos sem expor valores ou IDs", async () => {
+  const result = await runNotionPreflight(
+    clientFor({
+      tickets: [ticketPage("ticket-one"), ticketPage("ticket-two")],
+      history: [historyPage("event-one", ["ticket-one"])],
+    }),
     mappings,
     () => new Date("2026-10-26T12:00:00.000Z"),
   );
 
   assert.equal(result.checkedAt, "2026-10-26T12:00:00.000Z");
-  assert.equal(result.pagesRead, 1);
-  assert.equal(result.eligibleRecords, 1);
-  assert.equal(result.rejectedRecords, 0);
+  assert.equal(result.requestCount, 3);
+  assert.equal(result.tickets.eligibleRecords, 2);
+  assert.equal(result.history.eligibleRecords, 1);
   assert.equal(result.warningCount, 0);
-  assert.equal(result.fields.find((field) => field.fieldKey === "ticket.externalCode").coveragePercent, 0);
-  assert.equal(result.fields.find((field) => field.fieldKey === "ticket.requester").coveragePercent, 100);
+  assert.equal(result.tickets.fields.find((field) => field.fieldKey === "ticket.externalCode").coveragePercent, 0);
+  assert.equal(result.relationship.linkedEvents, 1);
+  assert.equal(result.relationship.distinctLinkedTickets, 1);
+  assert.equal(result.relationship.eventCoveragePercent, 100);
+  assert.equal(result.relationship.ticketCoveragePercent, 50);
   assert.equal(JSON.stringify(result).includes("Solicitante protegido"), false);
-  assert.equal(JSON.stringify(result).includes("notion-page-id"), false);
+  assert.equal(JSON.stringify(result).includes("ticket-one"), false);
+  assert.equal(JSON.stringify(result).includes("event-one"), false);
 });
 
-test("contabiliza duplicidade técnica e ausência obrigatória sem descartar outros chamados", async () => {
-  const result = await runTicketPreflight(clientFor([
-    ticketPage("page-one"),
-    ticketPage("page-one"),
-    ticketPage("page-two", { Status: { id: "status", type: "status", status: null } }),
-  ]), mappings);
+test("separa vínculo ausente, órfão e ambíguo e evita contagem dupla do campo obrigatório", async () => {
+  const result = await runNotionPreflight(clientFor({
+    tickets: [ticketPage("ticket-one")],
+    history: [
+      historyPage("linked", ["ticket-one"]),
+      historyPage("missing", []),
+      historyPage("orphan", ["unknown-ticket"]),
+      historyPage("ambiguous", ["ticket-one", "unknown-ticket"]),
+    ],
+  }), mappings);
 
-  assert.equal(result.pagesRead, 3);
-  assert.equal(result.eligibleRecords, 2);
-  assert.equal(result.rejectedRecords, 1);
-  assert.equal(result.warningCount, 2);
-  assert.equal(result.fields.find((field) => field.fieldKey === "ticket.status").missingCount, 1);
+  assert.deepEqual(result.relationship, {
+    linkedEvents: 1,
+    missingRelationEvents: 1,
+    orphanEvents: 1,
+    ambiguousEvents: 1,
+    unlinkedEvents: 3,
+    distinctLinkedTickets: 1,
+    eventCoveragePercent: 25,
+    ticketCoveragePercent: 100,
+  });
+  assert.equal(result.history.fields.find((field) => field.fieldKey === "history.ticketRelation").missingCount, 1);
+  assert.equal(result.history.warningCount, 1);
+  assert.equal(result.warningCount, 3);
+});
+
+test("trata relação truncada como ambígua em vez de assumir um chamado incorreto", async () => {
+  const result = await runNotionPreflight(clientFor({
+    tickets: [ticketPage("ticket-one")],
+    history: [historyPage("truncated", ["ticket-one"], {
+      Chamado: { id: "ticket-relation", type: "relation", relation: [{ id: "ticket-one" }], has_more: true },
+    })],
+  }), mappings);
+
+  assert.equal(result.relationship.linkedEvents, 0);
+  assert.equal(result.relationship.ambiguousEvents, 1);
+  assert.equal(result.warningCount, 1);
+});
+
+test("contabiliza duplicidades e ausências obrigatórias em cada fonte", async () => {
+  const result = await runNotionPreflight(clientFor({
+    tickets: [
+      ticketPage("page-one"),
+      ticketPage("page-one"),
+      ticketPage("page-two", { Status: { id: "status", type: "status", status: null } }),
+    ],
+    history: [historyPage("event-one", ["page-one"]), historyPage("event-one", ["page-one"])],
+  }), mappings);
+
+  assert.equal(result.tickets.pagesRead, 3);
+  assert.equal(result.tickets.eligibleRecords, 2);
+  assert.equal(result.tickets.rejectedRecords, 1);
+  assert.equal(result.tickets.warningCount, 2);
+  assert.equal(result.history.rejectedRecords, 1);
+  assert.equal(result.history.warningCount, 1);
+  assert.equal(result.warningCount, 3);
 });
 
 test("bloqueia pré-validação com mapeamento incompleto ou esquema alterado", async () => {
   await assert.rejects(
-    () => runTicketPreflight(clientFor([]), []),
+    () => runNotionPreflight(clientFor(), []),
     (error) => error instanceof NotionPreflightError && error.code === "mapping_incomplete",
   );
 
   await assert.rejects(
-    () => runTicketPreflight(clientFor([]), mappings.map((mapping) => (
+    () => runNotionPreflight(clientFor(), mappings.map((mapping) => (
       mapping.fieldKey === "ticket.status" ? { ...mapping, propertyId: "removed-status" } : mapping
     ))),
     (error) => error instanceof NotionPreflightError && error.code === "mapping_outdated",

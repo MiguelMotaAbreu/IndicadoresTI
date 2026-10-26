@@ -3,7 +3,7 @@ import { getApplicationDatabase } from "@/app/lib/database";
 import { NotionClientError, NotionReadClient } from "@/app/lib/notion-client";
 import { loadNotionConfiguration } from "@/app/lib/notion-configuration";
 import { NotionMappingStore } from "@/app/lib/notion-mapping-store";
-import { NotionPreflightError, runTicketPreflight } from "@/app/lib/notion-preflight";
+import { NotionPreflightError, runNotionPreflight } from "@/app/lib/notion-preflight";
 import { getCurrentSession } from "@/app/lib/request-session";
 
 function noStoreJson(payload: unknown, init?: ResponseInit): Response {
@@ -54,16 +54,16 @@ export async function POST() {
 
   try {
     const mappings = new NotionMappingStore(database).listForIngestion();
-    const result = await runTicketPreflight(new NotionReadClient(configuration), mappings);
+    const result = await runNotionPreflight(new NotionReadClient(configuration), mappings);
     audit.append({
       actor,
       action: "sync.preflight_completed",
       targetType: "integration",
       targetLabel: "Notion",
       outcome: "success",
-      summary: `Pré-validação concluída para ${result.eligibleRecords} chamados, com ${result.warningCount} alerta(s).`,
+      summary: `Pré-validação concluída para ${result.tickets.eligibleRecords} chamados e ${result.history.eligibleRecords} eventos; ${result.relationship.linkedEvents} vínculo(s) válido(s) e ${result.warningCount} alerta(s).`,
     });
-    return noStoreJson({ ok: true, source: "tickets", ...result });
+    return noStoreJson({ ok: true, ...result });
   } catch (error) {
     const safeError = error instanceof NotionClientError || error instanceof NotionPreflightError
       ? error
@@ -74,7 +74,7 @@ export async function POST() {
       targetType: "integration",
       targetLabel: "Notion",
       outcome: "failure",
-      summary: `Pré-validação dos chamados falhou (${safeError.code}).`,
+      summary: `Pré-validação das bases falhou (${safeError.code}).`,
     });
     return noStoreJson(
       { ok: false, code: safeError.code, error: safeError.message },

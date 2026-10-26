@@ -46,7 +46,7 @@ O usuário pode reorganizar essa composição, restaurar o arranjo inicial do pa
 - Notion permanece como fonte oficial.
 - Integração somente leitura com as bases de chamados e histórico.
 - Sincronização manual, executada como job em segundo plano.
-- Antes da primeira publicação, uma pré-validação somente leitura percorre os chamados, confirma a paginação integral e calcula a cobertura dos campos mapeados sem persistir valores operacionais.
+- Antes da primeira publicação, uma pré-validação somente leitura percorre chamados e histórico, confirma a paginação integral, calcula a cobertura dos campos mapeados e mede vínculos ausentes, órfãos ou ambíguos entre eventos e chamados sem persistir valores operacionais.
 - Nova carga só é publicada após ser integralmente concluída e validada.
 - Em caso de falha, permanece visível a última carga íntegra.
 - Registros removidos do Notion são preservados localmente como inativos e excluídos dos indicadores por padrão.
