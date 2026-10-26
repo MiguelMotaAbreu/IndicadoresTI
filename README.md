@@ -102,7 +102,7 @@ Em **Administração > Mapeamentos**, o Administrador pode consultar o esquema a
 
 A interface sugere associações pelos nomes encontrados nos anexos, mas nada é persistido automaticamente. Ao salvar, o servidor consulta novamente o Notion, resolve os nomes escolhidos para IDs estáveis de propriedades, valida tipos e duplicidades e grava o conjunto inteiro em uma transação SQLite junto com seu evento de auditoria. IDs de propriedades ficam somente no servidor; a API e a interface retornam apenas nomes e tipos.
 
-Propriedades de fórmula são aceitas somente nos campos em que a base atual pode depender delas. O mapeamento confirma a compatibilidade estrutural; os valores produzidos por cada fórmula ainda precisarão ser validados registro a registro durante a futura importação.
+Propriedades de fórmula são aceitas somente nos campos em que a base atual pode depender delas. O mapeamento confirma a compatibilidade estrutural e a pré-validação inspeciona o resultado de cada registro: datas, números, booleanos e textos incompatíveis com o campo analítico são contabilizados como inválidos. Resultados `unsupported` ou `incomplete` de fórmulas e rollups nunca são tratados como valores utilizáveis.
 
 Cada registro de chamado será identificado internamente pelo `page.id` que acompanha toda página retornada pela API do Notion. O código visível é apenas uma referência opcional e sua ausência não descartará o chamado. A propriedade de título pode ser mapeada como solicitante, mas nunca será usada como chave. O motivo permanece como classificação analítica; descrições livres não são sincronizadas nem combinadas para formar identidade ou categoria no v1.
 
@@ -110,7 +110,7 @@ Cada registro de chamado será identificado internamente pelo `page.id` que acom
 
 Depois que a configuração e os oito campos obrigatórios estiverem completos, **Administração > Sincronização > Pré-validar bases** percorre chamados e histórico com paginação de 100 registros. As duas consultas somente leitura são iniciadas em paralelo, solicitam apenas as propriedades mapeadas, não gravam valores operacionais e não substituem o snapshot publicado.
 
-O resultado informa páginas lidas, registros elegíveis por `page.id`, duplicidades técnicas, alertas e cobertura dos campos em cada fonte. Também cruza a relação do evento com os `page.id` dos chamados lidos: vínculos ausentes, apontando para chamados inexistentes ou contendo mais de um destino são separados e nunca tratados como seguros. Valores ausentes reduzem apenas a cobertura dos indicadores dependentes; o chamado não é descartado por estar sem código visível ou por possuir outro campo analítico vazio. Consultas truncadas pelo limite de 10.000 resultados do Notion são recusadas em vez de apresentadas como completas.
+O resultado informa páginas lidas, registros elegíveis por `page.id`, duplicidades técnicas, alertas e cobertura válida dos campos em cada fonte. Ausências e valores inválidos aparecem separadamente; a cobertura considera somente valores que puderam ser normalizados para o tipo analítico esperado. Também cruza a relação do evento com os `page.id` dos chamados lidos: vínculos ausentes, apontando para chamados inexistentes ou contendo mais de um destino são separados e nunca tratados como seguros. O chamado não é descartado por estar sem código visível ou por possuir outro campo analítico vazio. Consultas truncadas pelo limite de 10.000 resultados do Notion são recusadas em vez de apresentadas como completas.
 
 ## Verificações
 

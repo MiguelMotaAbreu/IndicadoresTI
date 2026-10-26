@@ -1,6 +1,7 @@
 import type { NotionPageRecord, NotionReadClient, NotionSourceKey } from "./notion-client.ts";
 import type { IngestionNotionMapping } from "./notion-mapping-store.ts";
 import { notionMappingFields, type NotionMappingField } from "./notion-mapping.ts";
+import { decodeMappedNotionProperty } from "./notion-value-normalizer.ts";
 
 export type NotionPreflightErrorCode = "mapping_incomplete" | "mapping_outdated";
 
@@ -19,6 +20,8 @@ export type PreflightFieldCoverage = {
   label: string;
   required: boolean;
   presentCount: number;
+  validCount: number;
+  invalidCount: number;
   missingCount: number;
   coveragePercent: number;
 };
@@ -58,86 +61,6 @@ type MappedField = { mapping: IngestionNotionMapping; definition: NotionMappingF
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isValidDate(value: unknown): boolean {
-  return typeof value === "string" && value.trim().length > 0 && !Number.isNaN(Date.parse(value));
-}
-
-function hasTextItems(value: unknown): boolean {
-  return Array.isArray(value) && value.some((item) => (
-    isRecord(item)
-    && (
-      (typeof item.plain_text === "string" && item.plain_text.trim().length > 0)
-      || (isRecord(item.text) && typeof item.text.content === "string" && item.text.content.trim().length > 0)
-    )
-  ));
-}
-
-function hasNamedObject(value: unknown): boolean {
-  return isRecord(value) && typeof value.name === "string" && value.name.trim().length > 0;
-}
-
-function hasNamedItems(value: unknown): boolean {
-  return Array.isArray(value) && value.some(hasNamedObject);
-}
-
-function hasIdentifiedItems(value: unknown): boolean {
-  return Array.isArray(value) && value.some((item) => isRecord(item) && typeof item.id === "string" && item.id.trim().length > 0);
-}
-
-function hasFormulaValue(value: unknown): boolean {
-  if (!isRecord(value) || typeof value.type !== "string") return false;
-  if (value.type === "date") {
-    return isRecord(value.date) && isValidDate(value.date.start);
-  }
-  if (value.type === "string") return typeof value.string === "string" && value.string.trim().length > 0;
-  if (value.type === "number") return typeof value.number === "number" && Number.isFinite(value.number);
-  if (value.type === "boolean") return typeof value.boolean === "boolean";
-  return false;
-}
-
-function hasPropertyValue(value: unknown): boolean {
-  if (!isRecord(value) || typeof value.type !== "string") return false;
-
-  switch (value.type) {
-    case "title":
-      return hasTextItems(value.title);
-    case "rich_text":
-      return hasTextItems(value.rich_text);
-    case "select":
-      return hasNamedObject(value.select);
-    case "status":
-      return hasNamedObject(value.status);
-    case "multi_select":
-      return hasNamedItems(value.multi_select);
-    case "relation":
-      return hasIdentifiedItems(value.relation);
-    case "people":
-      return hasIdentifiedItems(value.people);
-    case "date":
-      return isRecord(value.date) && isValidDate(value.date.start);
-    case "created_time":
-      return isValidDate(value.created_time);
-    case "formula":
-      return hasFormulaValue(value.formula);
-    case "unique_id":
-      return isRecord(value.unique_id) && Number.isSafeInteger(value.unique_id.number);
-    case "number":
-      return typeof value.number === "number" && Number.isFinite(value.number);
-    case "checkbox":
-      return typeof value.checkbox === "boolean";
-    case "email":
-    case "url":
-    case "phone_number": {
-      const scalar = value[value.type];
-      return typeof scalar === "string" && scalar.trim().length > 0;
-    }
-    case "created_by":
-      return isRecord(value.created_by) && typeof value.created_by.id === "string" && value.created_by.id.trim().length > 0;
-    default:
-      return value[value.type] !== null && value[value.type] !== undefined;
-  }
 }
 
 function findProperty(page: NotionPageRecord, propertyId: string): unknown {
@@ -214,28 +137,32 @@ function analyzeSource(
 ): SourcePreflightResult & { uniquePages: NotionPageRecord[] } {
   const unique = uniquePages(rawPages);
   const fields = mappedFields.map(({ mapping, definition }) => {
-    const presentCount = unique.pages.reduce((total, page) => (
-      total + (hasPropertyValue(findProperty(page, mapping.propertyId)) ? 1 : 0)
-    ), 0);
-    const missingCount = unique.pages.length - presentCount;
+    const states = unique.pages.map((page) => (
+      decodeMappedNotionProperty(findProperty(page, mapping.propertyId), mapping).state
+    ));
+    const validCount = states.filter((state) => state === "valid").length;
+    const invalidCount = states.filter((state) => state === "invalid").length;
+    const missingCount = states.filter((state) => state === "missing").length;
     return {
       fieldKey: mapping.fieldKey,
       label: definition.label,
       required: definition.required,
-      presentCount,
+      presentCount: validCount + invalidCount,
+      validCount,
+      invalidCount,
       missingCount,
-      coveragePercent: coveragePercent(presentCount, unique.pages.length),
+      coveragePercent: coveragePercent(validCount, unique.pages.length),
     };
   });
-  const requiredWarnings = fields
-    .filter((field) => field.required)
-    .reduce((total, field) => total + field.missingCount, 0);
+  const fieldWarnings = fields.reduce((total, field) => (
+    total + field.invalidCount + (field.required ? field.missingCount : 0)
+  ), 0);
 
   return {
     pagesRead: rawPages.length,
     eligibleRecords: unique.pages.length,
     rejectedRecords: unique.rejectedRecords,
-    warningCount: unique.rejectedRecords + requiredWarnings,
+    warningCount: unique.rejectedRecords + fieldWarnings,
     requestCount,
     fields,
     uniquePages: unique.pages,

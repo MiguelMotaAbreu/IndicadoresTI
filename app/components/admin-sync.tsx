@@ -71,6 +71,8 @@ type PreflightSourceDiagnostic = {
     label: string;
     required: boolean;
     presentCount: number;
+    validCount: number;
+    invalidCount: number;
     missingCount: number;
     coveragePercent: number;
   }>;
@@ -320,11 +322,11 @@ export function AdminSync() {
               { key: "history", label: "Campos do histórico", source: preflightDiagnostic.history },
             ] as const).map(({ key, label, source }) => (
               <div className="preflight-coverage" key={key}>
-                <div><strong>{label}</strong><small>{source.requestCount} consulta(s) · {source.rejectedRecords} duplicidade(s). Campos vazios afetam somente os indicadores dependentes.</small></div>
+                <div><strong>{label}</strong><small>{source.requestCount} consulta(s) · {source.rejectedRecords} duplicidade(s). A cobertura considera somente valores válidos para o tipo analítico.</small></div>
                 <ul>
                   {source.fields.map((field) => (
-                    <li key={field.fieldKey} className={field.required && field.missingCount > 0 ? "has-warning" : ""}>
-                      <span><b>{field.label}</b><small>{field.required ? "Obrigatório" : "Opcional"} · {field.missingCount} ausente(s)</small></span>
+                    <li key={field.fieldKey} className={field.invalidCount > 0 || (field.required && field.missingCount > 0) ? "has-warning" : ""}>
+                      <span><b>{field.label}</b><small>{field.required ? "Obrigatório" : "Opcional"} · {field.missingCount} ausente(s) · {field.invalidCount} inválido(s)</small></span>
                       <em>{field.coveragePercent.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</em>
                     </li>
                   ))}

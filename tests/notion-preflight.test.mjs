@@ -116,6 +116,8 @@ test("mantém chamado sem código elegível e mede os vínculos sem expor valore
   assert.equal(result.history.eligibleRecords, 1);
   assert.equal(result.warningCount, 0);
   assert.equal(result.tickets.fields.find((field) => field.fieldKey === "ticket.externalCode").coveragePercent, 0);
+  assert.equal(result.tickets.fields.find((field) => field.fieldKey === "ticket.openedAt").validCount, 2);
+  assert.equal(result.tickets.fields.find((field) => field.fieldKey === "ticket.openedAt").invalidCount, 0);
   assert.equal(result.relationship.linkedEvents, 1);
   assert.equal(result.relationship.distinctLinkedTickets, 1);
   assert.equal(result.relationship.eventCoveragePercent, 100);
@@ -123,6 +125,26 @@ test("mantém chamado sem código elegível e mede os vínculos sem expor valore
   assert.equal(JSON.stringify(result).includes("Solicitante protegido"), false);
   assert.equal(JSON.stringify(result).includes("ticket-one"), false);
   assert.equal(JSON.stringify(result).includes("event-one"), false);
+});
+
+test("separa valor inválido de campo vazio e reduz a cobertura sem expor o conteúdo", async () => {
+  const result = await runNotionPreflight(clientFor({
+    tickets: [
+      ticketPage("valid-ticket"),
+      ticketPage("invalid-ticket", {
+        Abertura: { id: "opened", type: "date", date: { start: "data impossível" } },
+      }),
+    ],
+    history: [historyPage("event-one", ["valid-ticket"])],
+  }), mappings);
+  const opening = result.tickets.fields.find((field) => field.fieldKey === "ticket.openedAt");
+
+  assert.equal(opening.validCount, 1);
+  assert.equal(opening.invalidCount, 1);
+  assert.equal(opening.missingCount, 0);
+  assert.equal(opening.coveragePercent, 50);
+  assert.equal(result.tickets.warningCount, 1);
+  assert.equal(JSON.stringify(result).includes("data impossível"), false);
 });
 
 test("separa vínculo ausente, órfão e ambíguo e evita contagem dupla do campo obrigatório", async () => {
