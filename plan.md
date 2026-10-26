@@ -112,7 +112,7 @@ Os anexos contêm 518 chamados entre 7 de julho e 20 de outubro de 2026 e 72 mov
 - Acesso somente pela LAN através de IP fixo.
 - HTTPS com certificado emitido por CA interna/local.
 - Somente ambiente persistente de produção.
-- Logs estruturados locais, histórico de jobs e tela administrativa de saúde.
+- Logs estruturados locais, histórico de jobs e tela administrativa de saúde com diagnóstico de SQLite, configuração do Notion, mapeamentos, snapshot publicado, jobs e processo da aplicação; conectividade externa permanece no teste específico da sincronização.
 - Componentes exclusivamente open source.
 - Pacote manual para exportar e restaurar painéis, mapeamentos e configurações.
 

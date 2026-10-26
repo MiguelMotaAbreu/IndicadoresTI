@@ -59,6 +59,7 @@ import {
 } from "@phosphor-icons/react";
 import { logout } from "./actions/auth";
 import { AdminAudit } from "./components/admin-audit";
+import { AdminHealth } from "./components/admin-health";
 import { AdminMapping } from "./components/admin-mapping";
 import { AdminSync } from "./components/admin-sync";
 import { AdminUsers } from "./components/admin-users";
@@ -1321,19 +1322,10 @@ function Admin({ currentUser }: { currentUser: CurrentUser }) {
           {section === "sync" && <AdminSync />}
           {section === "users" && <AdminUsers currentUserId={currentUser.id} />}
           {section === "mapping" && <AdminMapping />}
-          {section === "health" && <AdminPlaceholder icon={ActivityIcon} title="Saúde da instalação" description="SQLite, espaço em disco, serviço Docker, certificado local e conectividade com a API." action="Executar diagnóstico" />}
+          {section === "health" && <AdminHealth />}
           {section === "audit" && <AdminAudit />}
         </section>
       </div>
-    </div>
-  );
-}
-
-function AdminPlaceholder({ icon: Icon, title, description, action }: { icon: typeof ActivityIcon; title: string; description: string; action: string }) {
-  return (
-    <div className="admin-placeholder">
-      <span><Icon size={30} weight="duotone" /></span><h2>{title}</h2><p>{description}</p><button className="button button--primary">{action}</button>
-      <div className="placeholder-table"><i /><i /><i /><i /></div>
     </div>
   );
 }

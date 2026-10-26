@@ -242,6 +242,8 @@ async function runAuditFlow(baseUrl) {
   try {
     const anonymousAudit = await anonymousContext.request.get(`${baseUrl}/api/admin/audit`);
     if (anonymousAudit.status() !== 401) throw new Error("A auditoria aceitou uma consulta anônima.");
+    const anonymousHealth = await anonymousContext.request.get(`${baseUrl}/api/admin/health`);
+    if (anonymousHealth.status() !== 401) throw new Error("A saúde do sistema aceitou uma consulta anônima.");
     const anonymousSync = await anonymousContext.request.get(`${baseUrl}/api/admin/sync`);
     if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
     const anonymousSyncStart = await anonymousContext.request.post(`${baseUrl}/api/admin/sync`);
@@ -286,6 +288,8 @@ async function runAuditFlow(baseUrl) {
       await analystPage.waitForURL(/\/trocar-senha$/);
       const forbiddenAudit = await analystContext.request.get(`${baseUrl}/api/admin/audit`);
       if (forbiddenAudit.status() !== 403) throw new Error("Uma conta Analista consultou a auditoria.");
+      const forbiddenHealth = await analystContext.request.get(`${baseUrl}/api/admin/health`);
+      if (forbiddenHealth.status() !== 403) throw new Error("Uma conta Analista consultou a saúde do sistema.");
       const forbiddenSync = await analystContext.request.get(`${baseUrl}/api/admin/sync`);
       if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
       const forbiddenSyncStart = await analystContext.request.post(`${baseUrl}/api/admin/sync`);
@@ -371,6 +375,18 @@ async function runAuditFlow(baseUrl) {
       throw new Error("O estado inicial da tela de mapeamentos não está vazio.");
     }
 
+    const healthResponse = await administratorContext.request.get(`${baseUrl}/api/admin/health`);
+    if (!healthResponse.ok()) throw new Error("A conta Administrador não conseguiu executar o diagnóstico da instalação.");
+    const healthPayload = await healthResponse.json();
+    const healthKeys = new Set(healthPayload.report?.checks?.map((check) => check.key));
+    for (const expectedKey of ["database", "integration", "mapping", "snapshot", "jobs", "process"]) {
+      if (!healthKeys.has(expectedKey)) throw new Error(`O diagnóstico não retornou a verificação ${expectedKey}.`);
+    }
+    const serializedHealth = JSON.stringify(healthPayload);
+    if (serializedHealth.includes("PULSETI_NOTION_TOKEN") || serializedHealth.includes("secret_")) {
+      throw new Error("O diagnóstico da instalação expôs uma credencial do Notion.");
+    }
+
     await administratorPage.getByRole("button", { name: "Administração" }).click();
     await administratorPage.getByRole("heading", { name: "Sincronização com o Notion" }).waitFor();
     await administratorPage.getByText("Nenhuma carga publicada", { exact: true }).waitFor();
@@ -413,6 +429,12 @@ async function runAuditFlow(baseUrl) {
     if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Carregar propriedades" }).isDisabled())) {
       throw new Error("A interface liberou o mapeamento sem configuração completa.");
     }
+    await administratorPage.getByRole("button", { name: "Saúde do sistema" }).click();
+    await administratorPage.getByRole("heading", { name: "Saúde da instalação" }).waitFor();
+    await administratorPage.getByText("Banco SQLite", { exact: true }).waitFor();
+    await administratorPage.getByText("Configuração do Notion", { exact: true }).waitFor();
+    await administratorPage.getByRole("button", { name: "Executar diagnóstico" }).click();
+    await administratorPage.getByText("Verificado em", { exact: false }).waitFor();
     await administratorPage.getByRole("button", { name: "Auditoria" }).click();
     await administratorPage.getByRole("heading", { name: "Log de auditoria" }).waitFor();
     await administratorPage.getByText("Usuário criado", { exact: true }).first().waitFor();
@@ -429,7 +451,7 @@ async function runAuditFlow(baseUrl) {
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: auditoria, autorização, mapeamentos, proteção e recuperação da sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, saúde, mapeamentos, proteção e recuperação da sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

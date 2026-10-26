@@ -78,6 +78,12 @@ Administradores podem consultar em **Administração > Auditoria** os 200 evento
 
 Os eventos guardam um retrato do ator, alvo, resultado, data e resumo da ação. Senhas, hashes e tokens de sessão nunca fazem parte do registro. Alterações de usuários e seus eventos são confirmados na mesma transação SQLite.
 
+### Saúde da instalação
+
+Em **Administração > Saúde do sistema**, o Administrador executa um diagnóstico local e sem efeitos colaterais. A tela verifica a integridade e a versão do SQLite, a presença da configuração do Notion, a completude dos mapeamentos obrigatórios, o último snapshot publicado, o estado dos jobs de sincronização e o tempo ativo do processo.
+
+O estado geral adota a condição mais grave encontrada: saudável, atenção ou crítico. Tokens, IDs das bases, caminhos locais e conteúdo de chamados não fazem parte da resposta. A verificação não realiza chamadas externas; a conectividade real com o Notion continua sendo validada pelo botão **Testar conexão** na tela de Sincronização.
+
 ### Fundação da sincronização
 
 Administradores podem consultar em **Administração > Sincronização** o estado real da configuração, a última carga íntegra e o histórico de execuções. A simulação visual anterior foi removida: enquanto o conector não estiver disponível, a aplicação informa claramente a pendência e não apresenta uma sincronização fictícia como concluída.
