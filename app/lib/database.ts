@@ -182,6 +182,22 @@ const databaseMigrations: readonly DatabaseMigration[] = [
       WHERE field_key = 'ticket.title';
     `,
   },
+  {
+    version: 8,
+    name: "create_analytical_snapshot_records",
+    sql: `
+      CREATE TABLE IF NOT EXISTS analytical_snapshot_records (
+        snapshot_id TEXT NOT NULL REFERENCES analytical_snapshots(id) ON DELETE CASCADE,
+        source_key TEXT NOT NULL CHECK (source_key IN ('tickets', 'history')),
+        notion_page_id TEXT NOT NULL CHECK (length(trim(notion_page_id)) BETWEEN 1 AND 200),
+        fields_json TEXT NOT NULL CHECK (length(fields_json) BETWEEN 2 AND 1000000 AND json_valid(fields_json)),
+        PRIMARY KEY (snapshot_id, source_key, notion_page_id)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS analytical_snapshot_records_page_idx
+      ON analytical_snapshot_records (source_key, notion_page_id);
+    `,
+  },
 ] as const;
 
 export const LATEST_DATABASE_VERSION = databaseMigrations.at(-1)?.version ?? 0;

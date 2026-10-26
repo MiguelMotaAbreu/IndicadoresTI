@@ -82,7 +82,7 @@ Os eventos guardam um retrato do ator, alvo, resultado, data e resumo da ação.
 
 Administradores podem consultar em **Administração > Sincronização** o estado real da configuração, a última carga íntegra e o histórico de execuções. A simulação visual anterior foi removida: enquanto o conector não estiver disponível, a aplicação informa claramente a pendência e não apresenta uma sincronização fictícia como concluída.
 
-O ciclo persistente de uma carga possui os estados `running`, `succeeded` e `failed`. Somente uma execução pode permanecer ativa, e a publicação de um novo snapshot acontece em uma única transação: a carga anterior só é substituída quando a nova carga foi completamente validada. Falhas preservam o último snapshot publicado.
+O ciclo persistente de uma carga possui os estados `running`, `succeeded` e `failed`. Somente uma execução pode permanecer ativa, e a publicação de um novo snapshot acontece em uma única transação: metadados e registros canônicos de chamados e eventos são gravados juntos, e a carga anterior só é substituída quando toda a operação termina. As contagens são derivadas dos registros efetivamente persistidos; falhas preservam o último snapshot publicado.
 
 As credenciais e IDs são lidos apenas no servidor pelas variáveis abaixo; a API administrativa expõe somente se cada requisito está configurado, nunca os valores:
 
@@ -94,7 +94,7 @@ $env:PULSETI_NOTION_HISTORY_DATABASE_ID="id-da-base-de-historico"
 
 Com as três variáveis configuradas, o botão **Testar conexão** faz consultas somente leitura usando a versão `2026-03-11` da API do Notion. O diagnóstico verifica o acesso às duas bases, resolve a fonte de dados de cada base e apresenta apenas nome, quantidade e tipos das propriedades. Tokens, IDs internos e mensagens brutas do serviço não são devolvidos ao navegador nem registrados na auditoria.
 
-Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explícita, pois escolher silenciosamente uma fonte poderia associar indicadores ao esquema errado. A publicação manual permanece bloqueada nesta fatia: nenhum chamado ou histórico é persistido, transformado ou publicado ainda.
+Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explícita, pois escolher silenciosamente uma fonte poderia associar indicadores ao esquema errado. A execução manual permanece bloqueada enquanto a orquestração do conector é construída; a camada de persistência já aceita apenas registros normalizados e mapeados, sem descrições livres ou anexos.
 
 ### Mapeamento das propriedades
 

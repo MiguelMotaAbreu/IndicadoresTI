@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { notionMappingFields, type NotionMappingFieldKey } from "./notion-mapping.ts";
+import type { NormalizedNotionRecord } from "./notion-record-transformer.ts";
 
 export type SyncRunStatus = "running" | "succeeded" | "failed";
 export type SnapshotStatus = "published" | "superseded";
@@ -12,6 +14,12 @@ export type SyncActor = {
 export type SnapshotCounts = {
   ticketCount: number;
   eventCount: number;
+  warningCount: number;
+};
+
+export type SnapshotDataset = {
+  tickets: readonly NormalizedNotionRecord[];
+  history: readonly NormalizedNotionRecord[];
   warningCount: number;
 };
 
@@ -43,6 +51,7 @@ export type SyncStoreErrorCode =
   | "sync_in_progress"
   | "run_unavailable"
   | "invalid_counts"
+  | "invalid_records"
   | "invalid_error";
 
 export class SyncStoreError extends Error {
@@ -79,6 +88,20 @@ type SnapshotRow = {
   created_at: string;
   published_at: string;
 };
+
+type SnapshotRecordRow = {
+  source_key: "tickets" | "history";
+  notion_page_id: string;
+  fields_json: string;
+};
+
+type PreparedSnapshotRecord = {
+  source: "tickets" | "history";
+  pageId: string;
+  fieldsJson: string;
+};
+
+type UnknownRecord = Record<string, unknown>;
 
 const SYNC_RUN_COLUMNS = `
   id, requested_by_user_id, requested_by_name, status, started_at, finished_at,
@@ -119,6 +142,113 @@ function validateCounts(counts: SnapshotCounts): void {
   if (![counts.ticketCount, counts.eventCount, counts.warningCount].every((value) => Number.isSafeInteger(value) && value >= 0)) {
     throw new SyncStoreError("invalid_counts", "As contagens da carga devem ser números inteiros não negativos.");
   }
+}
+
+const mappingSourceByField = new Map<NotionMappingFieldKey, "tickets" | "history">(
+  notionMappingFields.map((field) => [field.key, field.source]),
+);
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
+}
+
+function hasOnlyKeys(value: UnknownRecord, keys: readonly string[]): boolean {
+  const actualKeys = Object.keys(value);
+  return actualKeys.length === keys.length && actualKeys.every((key) => keys.includes(key));
+}
+
+function isNormalizedResult(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.state !== "string") return false;
+  if (value.state === "missing") return hasOnlyKeys(value, ["state"]);
+  if (value.state === "invalid") {
+    return hasOnlyKeys(value, ["state", "issue"])
+      && (value.issue === "malformed" || value.issue === "unsupported" || value.issue === "semantic_mismatch");
+  }
+  if (
+    value.state !== "valid"
+    || !hasOnlyKeys(value, ["state", "value"])
+    || !isRecord(value.value)
+    || typeof value.value.kind !== "string"
+  ) return false;
+
+  if (value.value.kind === "text") {
+    return hasOnlyKeys(value.value, ["kind", "value"]) && isNonEmptyString(value.value.value);
+  }
+  if (value.value.kind === "text_list") {
+    return hasOnlyKeys(value.value, ["kind", "value"]) && isStringList(value.value.value);
+  }
+  if (value.value.kind === "ids") {
+    return hasOnlyKeys(value.value, ["kind", "value", "truncated"])
+      && isStringList(value.value.value)
+      && typeof value.value.truncated === "boolean";
+  }
+  if (value.value.kind === "date") {
+    return hasOnlyKeys(value.value, ["kind", "value"])
+      && isNonEmptyString(value.value.value)
+      && !Number.isNaN(Date.parse(value.value.value));
+  }
+  if (value.value.kind === "number") {
+    return hasOnlyKeys(value.value, ["kind", "value"])
+      && typeof value.value.value === "number"
+      && Number.isFinite(value.value.value);
+  }
+  return value.value.kind === "boolean"
+    && hasOnlyKeys(value.value, ["kind", "value"])
+    && typeof value.value.value === "boolean";
+}
+
+function prepareRecords(
+  records: readonly NormalizedNotionRecord[],
+  expectedSource: "tickets" | "history",
+): PreparedSnapshotRecord[] {
+  if (!Array.isArray(records)) {
+    throw new SyncStoreError("invalid_records", "A carga analítica não contém uma coleção válida de registros.");
+  }
+
+  const pageIds = new Set<string>();
+  return records.map((record) => {
+    const pageId = typeof record?.pageId === "string" ? record.pageId : "";
+    if (
+      record?.source !== expectedSource
+      || pageId !== pageId.trim()
+      || pageId.length === 0
+      || pageId.length > 200
+      || pageIds.has(pageId)
+    ) {
+      throw new SyncStoreError("invalid_records", "A carga analítica contém origem, identidade ou duplicidade inválida.");
+    }
+    pageIds.add(pageId);
+
+    if (!record.fields || typeof record.fields !== "object" || Array.isArray(record.fields)) {
+      throw new SyncStoreError("invalid_records", "A carga analítica contém campos inválidos.");
+    }
+    const fieldKeys = Object.keys(record.fields) as NotionMappingFieldKey[];
+    if (
+      fieldKeys.some((fieldKey) => mappingSourceByField.get(fieldKey) !== expectedSource)
+      || Object.values(record.fields).some((value) => !isNormalizedResult(value))
+    ) {
+      throw new SyncStoreError("invalid_records", "A carga analítica contém um campo incompatível com sua origem.");
+    }
+
+    let fieldsJson: string;
+    try {
+      fieldsJson = JSON.stringify(record.fields);
+    } catch {
+      throw new SyncStoreError("invalid_records", "A carga analítica contém campos que não podem ser serializados.");
+    }
+    if (fieldsJson.length < 2 || fieldsJson.length > 1_000_000) {
+      throw new SyncStoreError("invalid_records", "A carga analítica excede o limite seguro por registro.");
+    }
+    return { source: expectedSource, pageId, fieldsJson };
+  });
 }
 
 function normalizeError(code: string, message: string): { code: string; message: string } {
@@ -162,7 +292,17 @@ export class SyncStore {
     }
   }
 
-  publish(runId: string, counts: SnapshotCounts, publishedAt = new Date()): AnalyticalSnapshot {
+  publish(runId: string, dataset: SnapshotDataset, publishedAt = new Date()): AnalyticalSnapshot {
+    const tickets = prepareRecords(dataset.tickets, "tickets");
+    const history = prepareRecords(dataset.history, "history");
+    if (tickets.length === 0) {
+      throw new SyncStoreError("invalid_records", "Uma carga vazia de chamados não pode substituir o snapshot publicado.");
+    }
+    const counts: SnapshotCounts = {
+      ticketCount: tickets.length,
+      eventCount: history.length,
+      warningCount: dataset.warningCount,
+    };
     validateCounts(counts);
     const timestamp = publishedAt.toISOString();
     const snapshotId = randomUUID();
@@ -189,6 +329,14 @@ export class SyncStore {
         timestamp,
       ) as SnapshotRow;
 
+      const insertRecord = this.database.prepare(`
+        INSERT INTO analytical_snapshot_records (snapshot_id, source_key, notion_page_id, fields_json)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const record of [...tickets, ...history]) {
+        insertRecord.run(snapshotId, record.source, record.pageId, record.fieldsJson);
+      }
+
       this.database.prepare(`
         UPDATE sync_runs
         SET status = 'succeeded', finished_at = ?, snapshot_id = ?,
@@ -208,6 +356,24 @@ export class SyncStore {
       this.database.exec("ROLLBACK;");
       throw error;
     }
+  }
+
+  recordsForSnapshot(
+    snapshotId: string,
+    source: "tickets" | "history",
+  ): NormalizedNotionRecord[] {
+    const rows = this.database.prepare(`
+      SELECT source_key, notion_page_id, fields_json
+      FROM analytical_snapshot_records
+      WHERE snapshot_id = ? AND source_key = ?
+      ORDER BY notion_page_id
+    `).all(snapshotId, source) as SnapshotRecordRow[];
+
+    return rows.map((row) => ({
+      source: row.source_key,
+      pageId: row.notion_page_id,
+      fields: JSON.parse(row.fields_json) as NormalizedNotionRecord["fields"],
+    }));
   }
 
   fail(runId: string, code: string, message: string, finishedAt = new Date()): SyncRun {
