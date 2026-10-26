@@ -94,7 +94,7 @@ $env:PULSETI_NOTION_HISTORY_DATABASE_ID="id-da-base-de-historico"
 
 Com as três variáveis configuradas, o botão **Testar conexão** faz consultas somente leitura usando a versão `2026-03-11` da API do Notion. O diagnóstico verifica o acesso às duas bases, resolve a fonte de dados de cada base e apresenta apenas nome, quantidade e tipos das propriedades. Tokens, IDs internos e mensagens brutas do serviço não são devolvidos ao navegador nem registrados na auditoria.
 
-Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explícita, pois escolher silenciosamente uma fonte poderia associar indicadores ao esquema errado. A execução manual permanece bloqueada nesta fatia: nenhum chamado ou histórico é importado, transformado ou publicado ainda.
+Uma base com nenhuma ou múltiplas fontes de dados é recusada de forma explícita, pois escolher silenciosamente uma fonte poderia associar indicadores ao esquema errado. A publicação manual permanece bloqueada nesta fatia: nenhum chamado ou histórico é persistido, transformado ou publicado ainda.
 
 ### Mapeamento das propriedades
 
@@ -105,6 +105,12 @@ A interface sugere associações pelos nomes encontrados nos anexos, mas nada é
 Propriedades de fórmula são aceitas somente nos campos em que a base atual pode depender delas. O mapeamento confirma a compatibilidade estrutural; os valores produzidos por cada fórmula ainda precisarão ser validados registro a registro durante a futura importação.
 
 Cada registro de chamado será identificado internamente pelo `page.id` que acompanha toda página retornada pela API do Notion. O código visível é apenas uma referência opcional e sua ausência não descartará o chamado. A propriedade de título pode ser mapeada como solicitante, mas nunca será usada como chave. O motivo permanece como classificação analítica; descrições livres não são sincronizadas nem combinadas para formar identidade ou categoria no v1.
+
+### Pré-validação dos chamados
+
+Depois que a configuração e os oito campos obrigatórios estiverem completos, **Administração > Sincronização > Pré-validar chamados** percorre a fonte de chamados com paginação de 100 registros. A consulta solicita somente as propriedades mapeadas, não grava valores operacionais e não substitui o snapshot publicado.
+
+O resultado informa páginas lidas, registros elegíveis por `page.id`, duplicidades técnicas, alertas e cobertura de cada campo. Valores ausentes reduzem apenas a cobertura dos indicadores dependentes; o chamado não é descartado por estar sem código visível ou por possuir outro campo analítico vazio. Consultas truncadas pelo limite de 10.000 resultados do Notion são recusadas em vez de apresentadas como completas.
 
 ## Verificações
 

@@ -142,3 +142,58 @@ test("classifica falhas de rede como indisponibilidade segura", async () => {
     },
   );
 });
+
+test("consulta todas as páginas com cursor e solicita somente propriedades mapeadas", async () => {
+  const requests = [];
+  const client = new NotionReadClient(configuration, {
+    fetchImplementation: async (url, init) => {
+      requests.push({ url: String(url), init });
+      const body = JSON.parse(init.body);
+      if (!body.start_cursor) {
+        return jsonResponse({
+          object: "list",
+          results: [{ object: "page", id: "page-one", properties: { Abertura: { id: "open%3Adate", type: "date", date: { start: "2026-10-25T10:00:00-03:00" } } } }],
+          has_more: true,
+          next_cursor: "cursor-two",
+          request_status: { type: "complete" },
+        });
+      }
+      return jsonResponse({
+        object: "list",
+        results: [{ object: "page", id: "page-two", properties: { Status: { id: "status", type: "status", status: { name: "Concluído" } } } }],
+        has_more: false,
+        next_cursor: null,
+        request_status: { type: "complete" },
+      });
+    },
+  });
+
+  const result = await client.queryDataSource("tickets-source", ["open%3Adate", "status", "status"]);
+
+  assert.equal(result.requestCount, 2);
+  assert.deepEqual(result.pages.map((page) => page.id), ["page-one", "page-two"]);
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].url, /filter_properties\[\]=open%3Adate/);
+  assert.match(requests[0].url, /filter_properties\[\]=status/);
+  assert.equal(requests[0].init.method, "POST");
+  assert.equal(requests[0].init.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(requests[0].init.body), { page_size: 100, result_type: "page", is_archived: false });
+  assert.deepEqual(JSON.parse(requests[1].init.body), { page_size: 100, result_type: "page", is_archived: false, start_cursor: "cursor-two" });
+});
+
+test("recusa uma consulta truncada pelo limite do Notion", async () => {
+  const client = new NotionReadClient(configuration, {
+    fetchImplementation: async () => jsonResponse({
+      object: "list",
+      results: [],
+      has_more: false,
+      next_cursor: null,
+      request_status: { type: "incomplete", incomplete_reason: "query_result_limit_reached" },
+    }),
+  });
+
+  await assert.rejects(
+    () => client.queryDataSource("tickets-source", ["title"]),
+    (error) => error instanceof NotionClientError && error.code === "query_limit_reached",
+  );
+});

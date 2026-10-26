@@ -28,6 +28,7 @@ test("substitui o conjunto de mapeamentos e não expõe IDs de propriedades", ()
     assert.equal(first.effect, 2);
     assert.equal(first.mappings.length, 2);
     assert.equal(JSON.stringify(first.mappings).includes("private-title-id"), false);
+    assert.equal(store.listForIngestion()[0].propertyId, "private-title-id");
 
     const second = store.saveAtomically([
       { fieldKey: "ticket.externalCode", source: "tickets", propertyId: "new-title-id", propertyName: "Código atualizado", propertyType: "title" },

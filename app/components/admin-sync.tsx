@@ -41,7 +41,7 @@ type SyncResponse = {
     requiredTotal: number;
     ready: boolean;
   };
-  capabilities: { canStart: boolean; blockedReason: string };
+  capabilities: { canPreflight: boolean; canStart: boolean; blockedReason: string };
   activeRun: SyncRun | null;
   latestSnapshot: (SnapshotCounts & { id: string; publishedAt: string }) | null;
   recentRuns: SyncRun[];
@@ -57,6 +57,25 @@ type ConnectionDiagnostic = {
     name: string;
     propertyCount: number;
     properties: Array<{ name: string; type: string }>;
+  }>;
+};
+
+type PreflightDiagnostic = {
+  ok: true;
+  source: "tickets";
+  checkedAt: string;
+  pagesRead: number;
+  eligibleRecords: number;
+  rejectedRecords: number;
+  warningCount: number;
+  requestCount: number;
+  fields: Array<{
+    fieldKey: string;
+    label: string;
+    required: boolean;
+    presentCount: number;
+    missingCount: number;
+    coveragePercent: number;
   }>;
 };
 
@@ -108,6 +127,22 @@ async function testNotionConnection(): Promise<ConnectionDiagnostic> {
   return payload as ConnectionDiagnostic;
 }
 
+async function preflightTickets(): Promise<PreflightDiagnostic> {
+  const response = await fetch("/api/admin/sync/preflight", {
+    method: "POST",
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null) as unknown;
+  const isObject = typeof payload === "object" && payload !== null;
+  const errorMessage = isObject && "error" in payload && typeof payload.error === "string"
+    ? payload.error
+    : null;
+  if (!response.ok || !isObject || !("ok" in payload) || payload.ok !== true) {
+    throw new Error(errorMessage ?? "Não foi possível pré-validar os chamados.");
+  }
+  return payload as PreflightDiagnostic;
+}
+
 export function AdminSync() {
   const [state, setState] = useState<SyncResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -115,12 +150,17 @@ export function AdminSync() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectionDiagnostic, setConnectionDiagnostic] = useState<ConnectionDiagnostic | null>(null);
+  const [runningPreflight, setRunningPreflight] = useState(false);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [preflightDiagnostic, setPreflightDiagnostic] = useState<PreflightDiagnostic | null>(null);
 
   async function refresh(signal?: AbortSignal) {
     setLoading(true);
     setError(null);
     setConnectionError(null);
     setConnectionDiagnostic(null);
+    setPreflightError(null);
+    setPreflightDiagnostic(null);
     try {
       setState(await loadSyncState(signal));
     } catch (loadError) {
@@ -141,6 +181,19 @@ export function AdminSync() {
       setConnectionError(testError instanceof Error ? testError.message : "Não foi possível validar a conexão com o Notion.");
     } finally {
       setTestingConnection(false);
+    }
+  }
+
+  async function runPreflight() {
+    setRunningPreflight(true);
+    setPreflightError(null);
+    setPreflightDiagnostic(null);
+    try {
+      setPreflightDiagnostic(await preflightTickets());
+    } catch (preflightFailure) {
+      setPreflightError(preflightFailure instanceof Error ? preflightFailure.message : "Não foi possível pré-validar os chamados.");
+    } finally {
+      setRunningPreflight(false);
     }
   }
 
@@ -173,9 +226,9 @@ export function AdminSync() {
       <div className="admin-section-heading">
         <div><h2>Sincronização com o Notion</h2><p>A última carga íntegra permanece publicada enquanto uma nova carga é preparada e validada.</p></div>
         <div className="admin-sync__actions">
-          <button className="button button--ghost" disabled={loading} onClick={() => void refresh()}><ArrowsClockwiseIcon className={loading ? "spin" : ""} size={16} />Atualizar estado</button>
-          <button className="button button--ghost" disabled={loading || !state?.configuration.ready || testingConnection} onClick={() => void runConnectionTest()} title={state?.configuration.ready ? "Valida acesso e esquema sem importar registros." : "Complete a configuração do Notion para testar."}><CloudCheckIcon size={17} />{testingConnection ? "Testando..." : "Testar conexão"}</button>
-          <button className="button button--primary" disabled title={state?.capabilities.blockedReason ?? "Carregando disponibilidade."}><ArrowsClockwiseIcon size={17} />Sincronizar agora</button>
+          <button className="button button--ghost" disabled={loading || testingConnection || runningPreflight} onClick={() => void refresh()}><ArrowsClockwiseIcon className={loading ? "spin" : ""} size={16} />Atualizar estado</button>
+          <button className="button button--ghost" disabled={loading || runningPreflight || !state?.configuration.ready || testingConnection} onClick={() => void runConnectionTest()} title={state?.configuration.ready ? "Valida acesso e esquema sem importar registros." : "Complete a configuração do Notion para testar."}><CloudCheckIcon size={17} />{testingConnection ? "Testando..." : "Testar conexão"}</button>
+          <button className="button button--primary" disabled={loading || testingConnection || runningPreflight || !state?.capabilities.canPreflight} onClick={() => void runPreflight()} title={state?.capabilities.canPreflight ? "Lê os chamados sem publicar uma carga." : state?.capabilities.blockedReason ?? "Carregando disponibilidade."}><ArrowsClockwiseIcon className={runningPreflight ? "spin" : ""} size={17} />{runningPreflight ? "Pré-validando..." : "Pré-validar chamados"}</button>
         </div>
       </div>
 
@@ -205,6 +258,7 @@ export function AdminSync() {
       {state?.activeRun && <div className="sync-progress"><span><b>Sincronização iniciada por {state.activeRun.requestedBy.displayName}</b><small>A carga anterior continua disponível durante o processamento.</small></span><i><b /></i></div>}
 
       {connectionError && <div className="admin-users__error" role="alert"><WarningCircleIcon size={18} weight="fill" /><span>{connectionError}</span></div>}
+      {preflightError && <div className="admin-users__error" role="alert"><WarningCircleIcon size={18} weight="fill" /><span>{preflightError}</span></div>}
 
       {connectionDiagnostic && (
         <section className="connection-diagnostic" aria-live="polite">
@@ -219,6 +273,32 @@ export function AdminSync() {
                 <ul>{source.properties.map((property) => <li key={`${property.name}-${property.type}`}><span>{property.name}</span><code>{property.type}</code></li>)}</ul>
               </article>
             ))}
+          </div>
+        </section>
+      )}
+
+      {preflightDiagnostic && (
+        <section className="preflight-diagnostic" aria-live="polite">
+          <header>
+            <span><CheckCircleIcon size={20} weight="fill" /></span>
+            <div><strong>Pré-validação dos chamados concluída</strong><small>{formatDate(preflightDiagnostic.checkedAt)} · {preflightDiagnostic.requestCount} consulta(s) paginada(s)</small></div>
+          </header>
+          <div className="preflight-diagnostic__summary">
+            <span><b>Páginas lidas</b><strong>{preflightDiagnostic.pagesRead}</strong><small>Resposta integral da fonte</small></span>
+            <span><b>Elegíveis</b><strong>{preflightDiagnostic.eligibleRecords}</strong><small>Identificados por page.id</small></span>
+            <span className={preflightDiagnostic.rejectedRecords ? "has-warning" : ""}><b>Rejeitados</b><strong>{preflightDiagnostic.rejectedRecords}</strong><small>Duplicidades técnicas</small></span>
+            <span className={preflightDiagnostic.warningCount ? "has-warning" : ""}><b>Alertas</b><strong>{preflightDiagnostic.warningCount}</strong><small>Ausências obrigatórias e rejeições</small></span>
+          </div>
+          <div className="preflight-coverage">
+            <div><strong>Cobertura dos campos mapeados</strong><small>Campos vazios não descartam o chamado; afetam apenas os indicadores dependentes.</small></div>
+            <ul>
+              {preflightDiagnostic.fields.map((field) => (
+                <li key={field.fieldKey} className={field.required && field.missingCount > 0 ? "has-warning" : ""}>
+                  <span><b>{field.label}</b><small>{field.required ? "Obrigatório" : "Opcional"} · {field.missingCount} ausente(s)</small></span>
+                  <em>{field.coveragePercent.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</em>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
       )}

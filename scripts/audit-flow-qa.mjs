@@ -245,6 +245,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousMapping.status() !== 401) throw new Error("Os mapeamentos aceitaram uma consulta anônima.");
     const anonymousMappingUpdate = await anonymousContext.request.put(`${baseUrl}/api/admin/sync/mapping`, { data: { mappings: {} } });
     if (anonymousMappingUpdate.status() !== 401) throw new Error("Os mapeamentos aceitaram uma alteração anônima.");
+    const anonymousPreflight = await anonymousContext.request.post(`${baseUrl}/api/admin/sync/preflight`);
+    if (anonymousPreflight.status() !== 401) throw new Error("A pré-validação aceitou uma solicitação anônima.");
 
     const failedLoginPage = await anonymousContext.newPage();
     await login(failedLoginPage, administratorEmail, "senha propositalmente incorreta");
@@ -283,6 +285,8 @@ async function runAuditFlow(baseUrl) {
       if (forbiddenMapping.status() !== 403) throw new Error("Uma conta Analista consultou os mapeamentos.");
       const forbiddenMappingUpdate = await analystContext.request.put(`${baseUrl}/api/admin/sync/mapping`, { data: { mappings: {} } });
       if (forbiddenMappingUpdate.status() !== 403) throw new Error("Uma conta Analista alterou os mapeamentos.");
+      const forbiddenPreflight = await analystContext.request.post(`${baseUrl}/api/admin/sync/preflight`);
+      if (forbiddenPreflight.status() !== 403) throw new Error("Uma conta Analista executou a pré-validação.");
     } finally {
       await analystContext.close();
     }
@@ -302,6 +306,10 @@ async function runAuditFlow(baseUrl) {
       if (missingMappingUpdate.status() !== 409) {
         throw new Error("O mapeamento não recusou uma configuração incompleta.");
       }
+      const missingPreflight = await administratorContext.request.post(`${baseUrl}/api/admin/sync/preflight`);
+      if (missingPreflight.status() !== 409) {
+        throw new Error("A pré-validação não recusou uma configuração incompleta.");
+      }
     }
 
     const auditResponse = await administratorContext.request.get(`${baseUrl}/api/admin/audit?limit=200`);
@@ -309,7 +317,7 @@ async function runAuditFlow(baseUrl) {
     const auditPayload = await auditResponse.json();
     const actions = new Set(auditPayload.events.map((event) => event.action));
     const expectedActions = ["auth.login_failed", "auth.login_succeeded", "user.created", "user.deactivated", "user.reactivated"];
-    if (!externalBaseUrl) expectedActions.push("sync.connection_tested");
+    if (!externalBaseUrl) expectedActions.push("sync.connection_tested", "sync.preflight_completed");
     for (const expectedAction of expectedActions) {
       if (!actions.has(expectedAction)) throw new Error(`O evento ${expectedAction} não foi registrado.`);
     }
@@ -346,6 +354,9 @@ async function runAuditFlow(baseUrl) {
     if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Testar conexão" }).isDisabled())) {
       throw new Error("A interface liberou o teste de conexão sem configuração completa.");
     }
+    if (!externalBaseUrl && !(await administratorPage.getByRole("button", { name: "Pré-validar chamados" }).isDisabled())) {
+      throw new Error("A interface liberou a pré-validação sem configuração completa.");
+    }
     await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();
     await administratorPage.getByRole("heading", { name: "Mapeamentos do Notion" }).waitFor();
     await administratorPage.getByText("Nenhum mapeamento salvo", { exact: true }).waitFor();
@@ -359,13 +370,14 @@ async function runAuditFlow(baseUrl) {
     if (!externalBaseUrl) {
       await administratorPage.getByLabel("Categoria").selectOption("sync");
       await administratorPage.getByText("Conexão com o Notion testada", { exact: true }).first().waitFor();
+      await administratorPage.getByText("Pré-validação do Notion concluída", { exact: true }).first().waitFor();
     }
 
     await administratorPage.getByLabel("Categoria").selectOption("auth");
     await administratorPage.getByLabel("Resultado").selectOption("failure");
     await administratorPage.getByText("Login rejeitado", { exact: true }).first().waitFor();
 
-    process.stdout.write("QA concluído: auditoria, autorização, diagnóstico e estado dos mapeamentos funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, mapeamentos e proteção da pré-validação funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

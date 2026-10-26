@@ -12,9 +12,14 @@ export type StoredNotionMapping = {
   updatedAt: string;
 };
 
+export type IngestionNotionMapping = StoredNotionMapping & {
+  propertyId: string;
+};
+
 type MappingRow = {
   field_key: NotionMappingFieldKey;
   source_key: NotionSourceKey;
+  property_id?: string;
   property_name: string;
   property_type: string;
   updated_by_user_id: string | null;
@@ -35,6 +40,11 @@ function mapRow(row: MappingRow): StoredNotionMapping {
   };
 }
 
+function mapIngestionRow(row: MappingRow): IngestionNotionMapping {
+  if (!row.property_id) throw new Error("O mapeamento interno não possui um identificador de propriedade.");
+  return { ...mapRow(row), propertyId: row.property_id };
+}
+
 export class NotionMappingStore {
   private readonly database: DatabaseSync;
 
@@ -50,6 +60,16 @@ export class NotionMappingStore {
       ORDER BY source_key, field_key
     `).all() as MappingRow[];
     return rows.map(mapRow);
+  }
+
+  listForIngestion(): IngestionNotionMapping[] {
+    const rows = this.database.prepare(`
+      SELECT field_key, source_key, property_id, property_name, property_type,
+             updated_by_user_id, updated_by_name, updated_at
+      FROM notion_property_mappings
+      ORDER BY source_key, field_key
+    `).all() as MappingRow[];
+    return rows.map(mapIngestionRow);
   }
 
   saveAtomically<T>(

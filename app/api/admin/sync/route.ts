@@ -37,13 +37,17 @@ export async function GET() {
       ? `Configuração pendente: ${configuration.missing.join(", ")}.`
       : !mapping.ready
         ? `Mapeamento obrigatório pendente: ${mapping.requiredMapped} de ${mapping.requiredTotal} campos configurados.`
-        : "O importador e a validação da carga serão habilitados na próxima etapa.";
+        : "A pré-validação está disponível; a publicação da carga analítica ainda será habilitada em uma etapa posterior.";
 
     return noStoreJson({
       ok: true,
       configuration,
       mapping,
-      capabilities: { canStart: false, blockedReason },
+      capabilities: {
+        canPreflight: configuration.ready && mapping.ready,
+        canStart: false,
+        blockedReason,
+      },
       ...overview,
     });
   } catch {
