@@ -268,6 +268,8 @@ async function runAuditFlow(baseUrl) {
   const anonymousContext = await browser.newContext();
   const administratorContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const administratorPage = await administratorContext.newPage();
+  const administratorPageErrors = [];
+  administratorPage.on("pageerror", (error) => administratorPageErrors.push(error));
   const analystContext = await browser.newContext({ viewport: { width: 1366, height: 768 } });
   const analystPage = await analystContext.newPage();
   const analystPassword = "Senha definitiva Analista QA 789";
@@ -702,9 +704,50 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByRole("button", { name: "Status cruzado: Concluído" }).click();
       await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
+
+      await administratorPage.getByRole("button", { name: "Editar layout" }).click();
+      const dragHandle = administratorPage.locator(".react-grid-item .widget-drag-handle").first();
+      const dragHandleBox = await dragHandle.boundingBox();
+      if (!dragHandleBox) throw new Error("O QA não encontrou um bloco para testar a movimentação do layout.");
+      const dragStartX = dragHandleBox.x + dragHandleBox.width / 2;
+      const dragStartY = dragHandleBox.y + dragHandleBox.height / 2;
+      await administratorPage.mouse.move(dragStartX, dragStartY);
+      await administratorPage.mouse.down();
+      await administratorPage.mouse.move(dragStartX + 180, dragStartY + 120, { steps: 24 });
+      await administratorPage.mouse.up();
+      const updateDepthError = administratorPageErrors.find((error) => error.message.includes("Maximum update depth exceeded"));
+      if (updateDepthError) throw new Error("Movimentar o layout causou um ciclo de atualizações do React.");
+
+      await administratorPage.getByRole("button", { name: "Criar nova página" }).click();
+      await administratorPage.getByText("Página 2 está vazia", { exact: true }).waitFor();
+      if (await administratorPage.locator(".dashboard-grid-wrap .react-grid-item").count()) {
+        throw new Error("Uma página recém-criada não iniciou vazia.");
+      }
+      const emptyPageBox = await administratorPage.locator(".dashboard-grid-wrap").boundingBox();
+      if (!emptyPageBox || Math.abs(emptyPageBox.height - 523) > 2) {
+        throw new Error("A página analítica não respeitou o limite vertical de 13 linhas.");
+      }
+      await administratorPage.getByRole("button", { name: "Salvar layout" }).click();
+      await administratorPage.getByText("Layout e métricas salvos no servidor", { exact: true }).waitFor();
+      const pagedDraftResponse = await administratorContext.request.get(`${baseUrl}/api/dashboard-drafts/overview`);
+      const pagedDraft = await pagedDraftResponse.json();
+      if (!pagedDraftResponse.ok() || pagedDraft.draft?.schemaVersion !== 2 || pagedDraft.draft?.pages?.length !== 2) {
+        throw new Error("A nova página não foi persistida no rascunho versão 2.");
+      }
+      await administratorPage.reload({ waitUntil: "networkidle" });
+      await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
+      await administratorPage.getByRole("heading", { name: "Visão geral" }).waitFor();
+      await administratorPage.getByRole("tab", { name: "Página 2" }).click();
+      await administratorPage.getByText("Página 2 está vazia", { exact: true }).waitFor();
+      await administratorPage.getByRole("tab", { name: "Página 1" }).click();
+      const boundedCanvas = await administratorPage.locator(".dashboard-grid-wrap").boundingBox();
+      const boundedItems = await administratorPage.locator(".dashboard-grid-wrap .react-grid-item").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().bottom));
+      if (!boundedCanvas || boundedItems.some((bottom) => bottom > boundedCanvas.y + boundedCanvas.height + 1)) {
+        throw new Error("Um bloco ultrapassou o limite inferior da página ativa.");
+      }
     }
 
-    process.stdout.write("QA concluído: auditoria, autorização, saúde, Visão geral real, detalhamento protegido, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral real, detalhamento protegido, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await analystContext.close();

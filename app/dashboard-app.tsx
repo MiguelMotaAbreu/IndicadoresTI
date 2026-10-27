@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactGridLayout, {
   type Layout,
   useContainerWidth,
@@ -99,10 +99,14 @@ import {
   type MetricVisualization,
 } from "./lib/metrics";
 import {
+  DASHBOARD_MAX_PAGES,
+  DASHBOARD_PAGE_MAX_ROWS,
   cloneDashboardDraft,
   createDefaultDashboardDraft,
   dashboardDraftStorageKey,
   dashboardDraftsEqual,
+  dashboardPageLayoutsEqual,
+  findDashboardItemPlacement,
   parseDashboardDraft,
   serializeDashboardDraft,
   type DashboardDraftSnapshot,
@@ -110,7 +114,7 @@ import {
   type DraftLayoutItem,
 } from "./lib/dashboard-drafts";
 import { dashboardLayouts } from "./lib/dashboard-layouts";
-import { collisionSafeFreeCompactor, resolveDashboardLayoutCollisions } from "./lib/dashboard-layout-collisions";
+import { createBoundedDashboardCompactor, dashboardLayoutFitsBounds, magnetizeDashboardItem, resolveDashboardLayoutCollisions } from "./lib/dashboard-layout-collisions";
 import type { OverviewAnalytics } from "./lib/overview-analytics";
 import type { UserRole } from "./lib/user-store";
 
@@ -947,6 +951,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [builderWidgetId, setBuilderWidgetId] = useState<string | null>(null);
+  const [activePageId, setActivePageId] = useState("page-1");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [crossFilter, setCrossFilter] = useState<string | null>(null);
   const [overviewCrossFilter, setOverviewCrossFilter] = useState<OverviewCrossFilter | null>(null);
@@ -958,9 +963,13 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     ? { status: "loading", data: null, message: "Consultando o snapshot publicado." }
     : { status: "empty", data: null, message: "Modelo analítico não utilizado neste painel." });
   const { width, containerRef, mounted } = useContainerWidth();
-  const layout = draftEditor.current.layout as Layout;
-  const customWidgets = draftEditor.current.customWidgets;
-  const builderWidget = builderWidgetId ? customWidgets.find((widget) => widget.id === builderWidgetId) ?? null : null;
+  const boundedDashboardCompactor = useMemo(() => createBoundedDashboardCompactor(DASHBOARD_PAGE_MAX_ROWS), []);
+  const interactionStartLayout = useRef<Layout | null>(null);
+  const activePage = draftEditor.current.pages.find((page) => page.id === activePageId) ?? draftEditor.current.pages[0];
+  const layout = (activePage?.layout ?? []) as Layout;
+  const activeLayoutIds = new Set(layout.map((item) => item.i));
+  const customWidgets = draftEditor.current.customWidgets.filter((widget) => activeLayoutIds.has(widget.id));
+  const builderWidget = builderWidgetId ? draftEditor.current.customWidgets.find((widget) => widget.id === builderWidgetId) ?? null : null;
   const hasUnsavedChanges = !dashboardDraftsEqual(draftEditor.current, draftEditor.saved);
   const persistenceBusy = draftPersistenceStatus === "loading" || draftPersistenceStatus === "saving";
 
@@ -985,8 +994,8 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
         if (!saved) {
           const userStorageKey = dashboardDraftStorageKey(dashboardKey, currentUser.id);
           const legacyStorageKeys = currentUser.role === "administrador"
-            ? [userStorageKey, dashboardDraftStorageKey(dashboardKey)]
-            : [userStorageKey];
+            ? [userStorageKey, dashboardDraftStorageKey(dashboardKey, currentUser.id, 1), dashboardDraftStorageKey(dashboardKey), dashboardDraftStorageKey(dashboardKey, "admin", 1)]
+            : [userStorageKey, dashboardDraftStorageKey(dashboardKey, currentUser.id, 1)];
           let legacyRaw: string | null = null;
           let migratedStorageKey: string | null = null;
           try {
@@ -1025,6 +1034,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
         if (!active) return;
         const resolved = saved ?? createDefaultDashboardDraft(dashboardKey, dashboardLayouts[dashboardKey]);
         setDraftEditor({ current: cloneDashboardDraft(resolved), saved: resolved });
+        setActivePageId((current) => resolved.pages.some((page) => page.id === current) ? current : resolved.pages[0].id);
         setDraftPersistenceStatus("ready");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -1063,8 +1073,19 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
 
   function setLayout(updater: Layout | ((current: Layout) => Layout)) {
     setDraftEditor((state) => {
-      const nextLayout = typeof updater === "function" ? updater(state.current.layout as Layout) : updater;
-      return { ...state, current: { ...state.current, layout: toDraftLayout(nextLayout) } };
+      const page = state.current.pages.find((candidate) => candidate.id === activePageId) ?? state.current.pages[0];
+      const nextLayout = typeof updater === "function" ? updater(page.layout as Layout) : updater;
+      const nextDraftLayout = toDraftLayout(nextLayout);
+      if (dashboardPageLayoutsEqual(page.layout, nextDraftLayout)) return state;
+      return {
+        ...state,
+        current: {
+          ...state.current,
+          pages: state.current.pages.map((candidate) => candidate.id === page.id
+            ? { ...candidate, layout: nextDraftLayout }
+            : candidate),
+        },
+      };
     });
   }
 
@@ -1107,15 +1128,55 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   }
 
   function cancelEditing() {
-    setDraftEditor((state) => ({ ...state, current: cloneDashboardDraft(state.saved) }));
+    const restored = cloneDashboardDraft(draftEditor.saved);
+    setActivePageId((pageId) => restored.pages.some((page) => page.id === pageId) ? pageId : restored.pages[0].id);
+    setDraftEditor((state) => ({ ...state, current: restored }));
     setEditing(false);
     flash(hasUnsavedChanges ? "Alterações não salvas descartadas" : "Edição encerrada");
   }
 
   function restoreInitialLayout() {
-    const initial = createDefaultDashboardDraft(dashboardKey, dashboardLayouts[dashboardKey]);
-    setDraftEditor((state) => ({ ...state, current: initial }));
-    flash("Layout inicial aplicado; salve para tornar permanente");
+    setDraftEditor((state) => {
+      const page = state.current.pages.find((candidate) => candidate.id === activePageId) ?? state.current.pages[0];
+      const removedWidgetIds = new Set(page.layout.filter((item) => item.i.startsWith("custom-")).map((item) => item.i));
+      const isFirstPage = state.current.pages[0].id === page.id;
+      return {
+        ...state,
+        current: {
+          ...state.current,
+          pages: state.current.pages.map((candidate) => candidate.id === page.id
+            ? { ...candidate, layout: isFirstPage ? dashboardLayouts[dashboardKey].map((item) => ({ ...item })) : [] }
+            : candidate),
+          customWidgets: state.current.customWidgets.filter((widget) => !removedWidgetIds.has(widget.id)),
+        },
+      };
+    });
+    flash(activePage?.id === draftEditor.current.pages[0].id ? "Layout inicial aplicado à Página 1" : "Página esvaziada; salve para confirmar");
+  }
+
+  function createPage() {
+    if (draftEditor.current.pages.length >= DASHBOARD_MAX_PAGES) {
+      flash(`Limite de ${DASHBOARD_MAX_PAGES} páginas atingido`);
+      return;
+    }
+    const id = `page-${crypto.randomUUID()}`;
+    const name = `Página ${draftEditor.current.pages.length + 1}`;
+    setDraftEditor((state) => ({
+      ...state,
+      current: { ...state.current, pages: [...state.current.pages, { id, name, layout: [] }] },
+    }));
+    setActivePageId(id);
+    setEditing(true);
+    setFiltersOpen(false);
+    flash(`${name} criada no rascunho`);
+  }
+
+  function selectPage(pageId: string) {
+    setActivePageId(pageId);
+    setFiltersOpen(false);
+    setBuilderOpen(false);
+    setBuilderWidgetId(null);
+    setDetailsOpen(false);
   }
 
   async function saveDraft() {
@@ -1141,8 +1202,10 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
       if (!response.ok || !payload.ok || !saved) throw new Error(payload.error ?? "rascunho_não_salvo");
 
       window.localStorage.removeItem(dashboardDraftStorageKey(dashboardKey, currentUser.id));
+      window.localStorage.removeItem(dashboardDraftStorageKey(dashboardKey, currentUser.id, 1));
       if (currentUser.role === "administrador") {
         window.localStorage.removeItem(dashboardDraftStorageKey(dashboardKey));
+        window.localStorage.removeItem(dashboardDraftStorageKey(dashboardKey, "admin", 1));
       }
       setDraftEditor({ current: cloneDashboardDraft(saved), saved });
       setDraftPersistenceStatus("ready");
@@ -1165,14 +1228,23 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
       definition,
       preview,
     };
+    const placement = findDashboardItemPlacement(
+      { i: id, x: 0, y: 0, w: 6, h: 4, minW: 4, minH: 3 },
+      activePage?.layout ?? [],
+    );
+    if (!placement || !activePage) {
+      flash("Esta página está cheia; crie uma nova página para adicionar o indicador");
+      return;
+    }
     setDraftEditor((state) => {
-      const nextY = state.current.layout.reduce((bottom, item) => Math.max(bottom, item.y + item.h), 0);
       return {
         ...state,
         current: {
           ...state.current,
           customWidgets: [...state.current.customWidgets, widget],
-          layout: [...state.current.layout, { i: id, x: 0, y: nextY, w: 6, h: 4, minW: 4, minH: 3 }],
+          pages: state.current.pages.map((page) => page.id === activePage.id
+            ? { ...page, layout: [...page.layout, placement] }
+            : page),
         },
       };
     });
@@ -1214,7 +1286,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
       current: {
         ...state.current,
         customWidgets: state.current.customWidgets.filter((widget) => widget.id !== widgetId),
-        layout: state.current.layout.filter((item) => item.i !== widgetId),
+        pages: state.current.pages.map((page) => ({ ...page, layout: page.layout.filter((item) => item.i !== widgetId) })),
       },
     }));
     flash("Métrica removida do rascunho; salve para confirmar");
@@ -1222,9 +1294,10 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
 
   const scaledDemand = demandSeries.map((item) => ({ ...item, chamados: Math.max(1, Math.round(item.chamados * scale)), concluidos: Math.max(1, Math.round(item.concluidos * scale)) }));
   const metrics = dashboardKey === "overview" ? overviewMetrics(overviewState) : themeMetrics[dashboardKey];
-  const visibleMetrics = dashboardKey === "overview"
+  const allMetrics = dashboardKey === "overview"
     ? metrics
     : metrics.map((metric) => metric.id === "metric-total" && scale !== 1 ? { ...metric, value: String(Math.round(Number(metric.value) * scale)) } : metric);
+  const visibleMetrics = allMetrics.filter((metric) => activeLayoutIds.has(metric.id));
   const overviewPeriod = overviewState.status === "ready"
     && overviewState.data.selection.periodStart
     && overviewState.data.selection.periodEnd
@@ -1268,6 +1341,10 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
         <button className="filter-bar__main" disabled={!overviewFiltersAvailable} title={!overviewFiltersAvailable ? "Aguarde o carregamento do snapshot para filtrar." : undefined} onClick={() => setFiltersOpen((value) => !value)}><FunnelSimpleIcon size={17} /><strong>Filtros</strong><span>{filters.period}</span><CaretDownIcon size={14} /></button>
         <span className="filter-separator" />
         <button className="filter-pill" disabled={dashboardKey === "overview"}><CalendarBlankIcon size={15} /> {dashboardKey === "overview" ? overviewPeriod : "07 jul — 20 out"}</button>
+        <div className="dashboard-pages" role="tablist" aria-label="Páginas do painel">
+          {draftEditor.current.pages.map((page) => <button key={page.id} role="tab" aria-selected={page.id === activePage?.id} className={page.id === activePage?.id ? "is-active" : ""} onClick={() => selectPage(page.id)}>{page.name}</button>)}
+          <button className="dashboard-pages__add" aria-label="Criar nova página" title={`Criar página vazia (${draftEditor.current.pages.length}/${DASHBOARD_MAX_PAGES})`} disabled={draftEditor.current.pages.length >= DASHBOARD_MAX_PAGES || persistenceBusy} onClick={createPage}><PlusIcon size={13} /></button>
+        </div>
         {filters.sector !== defaultFilters.sector && <button className="filter-chip" onClick={() => updateFilters({ ...filters, sector: defaultFilters.sector })}>Setor: {filters.sector}<XIcon size={12} /></button>}
         {filters.priority !== defaultFilters.priority && overviewCrossFilter?.field !== "priority" && <button className="filter-chip" onClick={() => updateFilters({ ...filters, priority: defaultFilters.priority })}>Prioridade: {filters.priority}<XIcon size={12} /></button>}
         {filters.status !== defaultFilters.status && overviewCrossFilter?.field !== "status" && <button className="filter-chip" onClick={() => updateFilters({ ...filters, status: defaultFilters.status })}>Status: {filters.status}<XIcon size={12} /></button>}
@@ -1280,19 +1357,46 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
       {filtersOpen && <FilterPanel filters={filters} options={filterOptions} onChange={applyFilters} onClose={() => setFiltersOpen(false)} />}
 
       {editing && (
-        <div className="edit-notice"><PencilSimpleIcon size={16} /><span><strong>{hasUnsavedChanges ? "Alterações ainda não salvas." : "Modo de edição ativo."}</strong> Arraste e redimensione livremente; somente “Salvar layout” torna as mudanças permanentes.</span><button onClick={cancelEditing}>Cancelar</button></div>
+        <div className="edit-notice"><PencilSimpleIcon size={16} /><span><strong>{hasUnsavedChanges ? "Alterações ainda não salvas." : "Modo de edição ativo."}</strong> Aproxime blocos para encaixá-los magneticamente; afaste duas células para preservar um espaço. Somente “Salvar layout” torna as mudanças permanentes.</span><button onClick={cancelEditing}>Cancelar</button></div>
       )}
 
-      <div className="dashboard-grid-wrap" ref={containerRef}>
+      <div className={cn("dashboard-grid-wrap", layout.length === 0 && "dashboard-grid-wrap--empty")} ref={containerRef}>
+        {layout.length === 0 && <div className="dashboard-page-empty"><SquaresFourIcon size={28} weight="duotone" /><strong>{activePage?.name} está vazia</strong><span>{dashboardKey === "overview" ? "Esta página está pronta para receber novos indicadores quando o construtor analítico da Visão geral for habilitado." : "Use “Indicador” para começar uma nova composição analítica."}</span></div>}
         {mounted && (
           <ReactGridLayout
             width={width}
             layout={layout.map((item) => ({ ...item, static: !editing }))}
-            gridConfig={{ cols: 12, rowHeight: 31, margin: [10, 10], containerPadding: [0, 0] }}
+            autoSize={false}
+            gridConfig={{ cols: 12, rowHeight: 31, margin: [10, 10], containerPadding: [0, 0], maxRows: DASHBOARD_PAGE_MAX_ROWS }}
             dragConfig={{ enabled: editing, handle: ".widget-drag-handle", bounded: true }}
             resizeConfig={{ enabled: editing, handles: ["n", "e", "s", "w", "ne", "nw", "se", "sw"] }}
-            compactor={collisionSafeFreeCompactor}
-            onLayoutChange={(nextLayout) => { if (editing) setLayout([...nextLayout]); }}
+            compactor={boundedDashboardCompactor}
+            onDragStart={() => {
+              interactionStartLayout.current = layout.map((item) => ({ ...item }));
+            }}
+            onDragStop={(nextLayout, _oldItem, movedItem) => {
+              if (!editing || !movedItem) return;
+              const candidate = magnetizeDashboardItem(nextLayout, movedItem.i, { maxRows: DASHBOARD_PAGE_MAX_ROWS });
+              if (dashboardLayoutFitsBounds(candidate, 12, DASHBOARD_PAGE_MAX_ROWS)) {
+                setLayout(candidate);
+              } else {
+                if (interactionStartLayout.current) setLayout(interactionStartLayout.current);
+                flash("Movimento desfeito: o bloco ultrapassaria o limite da página");
+              }
+              interactionStartLayout.current = null;
+            }}
+            onResizeStart={() => {
+              interactionStartLayout.current = layout.map((item) => ({ ...item }));
+            }}
+            onResizeStop={(nextLayout) => {
+              if (dashboardLayoutFitsBounds(nextLayout, 12, DASHBOARD_PAGE_MAX_ROWS)) {
+                setLayout(nextLayout.map((item) => ({ ...item })));
+              } else {
+                if (interactionStartLayout.current) setLayout(interactionStartLayout.current);
+                flash("Redimensionamento desfeito: não há espaço dentro desta página");
+              }
+              interactionStartLayout.current = null;
+            }}
           >
 
             {visibleMetrics.map((metric) => (
@@ -1301,7 +1405,8 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
               </div>
             ))}
 
-            {renderDashboardWidgets(dashboardKey, editing, scaledDemand, setCrossFilter, applyOverviewCrossFilter, overviewState, () => setDetailsOpen(true))}
+            {renderDashboardWidgets(dashboardKey, editing, scaledDemand, setCrossFilter, applyOverviewCrossFilter, overviewState, () => setDetailsOpen(true))
+              .filter((widget) => activeLayoutIds.has(String(widget.key)))}
 
             {customWidgets.map((widget) => (
               <div key={widget.id}>

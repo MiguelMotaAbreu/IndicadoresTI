@@ -5,9 +5,27 @@ import {
   createDefaultDashboardDraft,
   dashboardDraftStorageKey,
   dashboardDraftsEqual,
+  dashboardPageLayoutsEqual,
   parseDashboardDraft,
   serializeDashboardDraft,
 } from "../app/lib/dashboard-drafts.ts";
+
+test("trata layouts geometricamente idênticos como a mesma atualização", () => {
+  const left = [
+    { i: "one", x: 0, y: 0, w: 6, h: 3, minW: 2 },
+    { i: "two", x: 6, y: 0, w: 6, h: 3 },
+  ];
+  const clonedInAnotherOrder = [
+    { ...left[1] },
+    { ...left[0] },
+  ];
+
+  assert.equal(dashboardPageLayoutsEqual(left, clonedInAnotherOrder), true);
+  assert.equal(dashboardPageLayoutsEqual(left, [
+    { ...left[0], y: 1 },
+    left[1],
+  ]), false);
+});
 
 const defaultLayout = [
   { i: "metric-total", x: 0, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
@@ -46,7 +64,7 @@ const customWidget = {
 
 test("serializa e recupera layout e métricas do painel correto", () => {
   const snapshot = createDefaultDashboardDraft("overview", defaultLayout);
-  snapshot.layout.push({ i: customWidget.id, x: 8, y: 2, w: 4, h: 4 });
+  snapshot.pages[0].layout.push({ i: customWidget.id, x: 8, y: 2, w: 4, h: 4 });
   snapshot.customWidgets.push(customWidget);
   snapshot.savedAt = "2026-10-22T15:00:00.000Z";
 
@@ -54,7 +72,7 @@ test("serializa e recupera layout e métricas do painel correto", () => {
 
   assert.ok(restored);
   assert.equal(restored.customWidgets[0].title, "Índice de carga");
-  assert.equal(restored.layout[2].i, customWidget.id);
+  assert.equal(restored.pages[0].layout[2].i, customWidget.id);
 });
 
 test("não carrega rascunho pertencente a outro painel", () => {
@@ -67,20 +85,20 @@ test("não carrega rascunho pertencente a outro painel", () => {
 
 test("rejeita layout incompleto ou adulterado", () => {
   const snapshot = createDefaultDashboardDraft("overview", defaultLayout);
-  snapshot.layout.pop();
+  snapshot.pages[0].layout.pop();
 
   assert.equal(parseDashboardDraft(serializeDashboardDraft(snapshot), "overview", defaultLayout), null);
 });
 
 test("repara uma cadeia de sobreposições presente em rascunho antigo", () => {
   const snapshot = createDefaultDashboardDraft("overview", defaultLayout);
-  snapshot.layout[1].y = 1;
+  snapshot.pages[0].layout[1].y = 1;
 
   const restored = parseDashboardDraft(serializeDashboardDraft(snapshot), "overview", defaultLayout);
 
   assert.ok(restored);
-  assert.equal(restored.layout[0].y, 0);
-  assert.equal(restored.layout[1].y, 2);
+  assert.equal(restored.pages[0].layout[0].y, 0);
+  assert.equal(restored.pages[0].layout[1].y, 2);
 });
 
 test("mudança de data de salvamento não marca o conteúdo como alterado", () => {
@@ -89,18 +107,18 @@ test("mudança de data de salvamento não marca o conteúdo como alterado", () =
   right.savedAt = "2026-10-22T15:00:00.000Z";
 
   assert.equal(dashboardDraftsEqual(left, right), true);
-  right.layout[0].x = 2;
+  right.pages[0].layout[0].x = 2;
   assert.equal(dashboardDraftsEqual(left, right), false);
 });
 
 test("remoção altera somente o rascunho atual até que seja salvo", () => {
   const saved = createDefaultDashboardDraft("overview", defaultLayout);
-  saved.layout.push({ i: customWidget.id, x: 8, y: 2, w: 4, h: 4 });
+  saved.pages[0].layout.push({ i: customWidget.id, x: 8, y: 2, w: 4, h: 4 });
   saved.customWidgets.push(customWidget);
   const current = cloneDashboardDraft(saved);
 
   current.customWidgets = current.customWidgets.filter((widget) => widget.id !== customWidget.id);
-  current.layout = current.layout.filter((item) => item.i !== customWidget.id);
+  current.pages[0].layout = current.pages[0].layout.filter((item) => item.i !== customWidget.id);
 
   assert.equal(current.customWidgets.length, 0);
   assert.equal(saved.customWidgets.length, 1);
@@ -110,10 +128,10 @@ test("remoção altera somente o rascunho atual até que seja salvo", () => {
 
 test("edição substitui a definição sem alterar identidade ou posição", () => {
   const saved = createDefaultDashboardDraft("overview", defaultLayout);
-  saved.layout.push({ i: customWidget.id, x: 8, y: 2, w: 4, h: 4 });
+  saved.pages[0].layout.push({ i: customWidget.id, x: 8, y: 2, w: 4, h: 4 });
   saved.customWidgets.push(customWidget);
   const current = cloneDashboardDraft(saved);
-  const originalLayout = structuredClone(current.layout);
+  const originalLayout = structuredClone(current.pages[0].layout);
 
   current.customWidgets = current.customWidgets.map((widget) => widget.id === customWidget.id ? {
     ...widget,
@@ -124,6 +142,42 @@ test("edição substitui a definição sem alterar identidade ou posição", () 
   assert.equal(current.customWidgets[0].id, customWidget.id);
   assert.equal(current.customWidgets[0].title, "Índice revisado");
   assert.equal(saved.customWidgets[0].title, "Índice de carga");
-  assert.deepEqual(current.layout, originalLayout);
+  assert.deepEqual(current.pages[0].layout, originalLayout);
   assert.equal(dashboardDraftsEqual(current, saved), false);
+});
+
+test("migra o rascunho de página única para Página 1 sem perder métricas", () => {
+  const legacy = {
+    schemaVersion: 1,
+    dashboardKey: "overview",
+    layout: [...defaultLayout, { i: customWidget.id, x: 8, y: 2, w: 4, h: 4 }],
+    customWidgets: [customWidget],
+    savedAt: "2026-10-22T15:00:00.000Z",
+  };
+
+  const restored = parseDashboardDraft(JSON.stringify(legacy), "overview", defaultLayout);
+
+  assert.ok(restored);
+  assert.equal(restored.schemaVersion, 2);
+  assert.equal(restored.pages[0].name, "Página 1");
+  assert.equal(restored.pages.flatMap((page) => page.layout).some((item) => item.i === customWidget.id), true);
+});
+
+test("aceita páginas vazias e rejeita blocos duplicados entre páginas", () => {
+  const snapshot = createDefaultDashboardDraft("overview", defaultLayout);
+  snapshot.pages.push({ id: "page-second", name: "Página 2", layout: [] });
+  assert.ok(parseDashboardDraft(serializeDashboardDraft(snapshot), "overview", defaultLayout));
+
+  snapshot.pages[1].layout.push({ ...snapshot.pages[0].layout[0] });
+  assert.equal(parseDashboardDraft(serializeDashboardDraft(snapshot), "overview", defaultLayout), null);
+});
+
+test("mantém todos os blocos dentro do limite vertical da página", () => {
+  const snapshot = createDefaultDashboardDraft("overview", defaultLayout);
+  snapshot.pages[0].layout[1].y = 999;
+
+  const restored = parseDashboardDraft(serializeDashboardDraft(snapshot), "overview", defaultLayout);
+
+  assert.ok(restored);
+  assert.ok(restored.pages[0].layout.every((item) => item.y >= 0 && item.y + item.h <= 13));
 });

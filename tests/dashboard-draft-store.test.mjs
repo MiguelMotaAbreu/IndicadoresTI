@@ -37,7 +37,7 @@ test("persiste e atualiza um rascunho por usuário e painel", () => {
     );
 
     const revised = structuredClone(first);
-    revised.layout[0].x = 4;
+    revised.pages[0].layout[0].x = 4;
     revised.savedAt = "2026-10-22T16:00:00.000Z";
     store.save("admin", revised);
     database.close();
@@ -46,7 +46,7 @@ test("persiste e atualiza um rascunho por usuário e painel", () => {
 
     const storedRevised = store.findSerialized("admin", "overview");
     assert.ok(storedRevised);
-    assert.equal(JSON.parse(storedRevised).layout[0].x, 4);
+    assert.equal(JSON.parse(storedRevised).pages[0].layout[0].x, 4);
     assert.equal(store.findSerialized("analyst", "overview"), null);
     assert.equal(store.findSerialized("admin", "demand"), null);
   } finally {

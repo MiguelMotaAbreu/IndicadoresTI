@@ -1,8 +1,10 @@
 import type { DashboardKey } from "../mock-data";
 import type { MetricDefinitionDraft, MetricPreview } from "./metrics";
-import { resolveDashboardLayoutCollisions } from "./dashboard-layout-collisions.ts";
+import { layoutItemsCollide } from "./dashboard-layout-collisions.ts";
 
-export const DASHBOARD_DRAFT_SCHEMA_VERSION = 1;
+export const DASHBOARD_DRAFT_SCHEMA_VERSION = 2;
+export const DASHBOARD_PAGE_MAX_ROWS = 13;
+export const DASHBOARD_MAX_PAGES = 12;
 
 export type DraftLayoutItem = {
   i: string;
@@ -25,10 +27,16 @@ export type DraftCustomWidget = {
   preview: MetricPreview;
 };
 
+export type DashboardDraftPage = {
+  id: string;
+  name: string;
+  layout: DraftLayoutItem[];
+};
+
 export type DashboardDraftSnapshot = {
   schemaVersion: typeof DASHBOARD_DRAFT_SCHEMA_VERSION;
   dashboardKey: DashboardKey;
-  layout: DraftLayoutItem[];
+  pages: DashboardDraftPage[];
   customWidgets: DraftCustomWidget[];
   savedAt: string | null;
 };
@@ -60,16 +68,20 @@ function sanitizeLayoutItem(value: unknown): DraftLayoutItem | null {
 
   const w = Math.min(12, Math.max(1, Math.round(value.w as number)));
   const x = Math.min(12 - w, Math.max(0, Math.round(value.x as number)));
+  const h = Math.min(DASHBOARD_PAGE_MAX_ROWS, Math.max(1, Math.round(value.h as number)));
   const item: DraftLayoutItem = {
     i: value.i,
     x,
-    y: Math.max(0, Math.round(value.y as number)),
+    y: Math.min(DASHBOARD_PAGE_MAX_ROWS - h, Math.max(0, Math.round(value.y as number))),
     w,
-    h: Math.max(1, Math.round(value.h as number)),
+    h,
   };
 
   for (const property of ["minW", "minH", "maxW", "maxH"] as const) {
-    if (finiteNumber(value[property])) item[property] = Math.max(1, Math.round(value[property]));
+    if (finiteNumber(value[property])) {
+      const maximum = property.endsWith("W") ? 12 : DASHBOARD_PAGE_MAX_ROWS;
+      item[property] = Math.min(maximum, Math.max(1, Math.round(value[property])));
+    }
   }
   return item;
 }
@@ -108,8 +120,12 @@ function sanitizeWidget(value: unknown): DraftCustomWidget | null {
   };
 }
 
-export function dashboardDraftStorageKey(dashboardKey: DashboardKey, userId = "admin"): string {
-  return `pulseti:v${DASHBOARD_DRAFT_SCHEMA_VERSION}:dashboard-draft:${userId}:${dashboardKey}`;
+export function dashboardDraftStorageKey(
+  dashboardKey: DashboardKey,
+  userId = "admin",
+  schemaVersion = DASHBOARD_DRAFT_SCHEMA_VERSION,
+): string {
+  return `pulseti:v${schemaVersion}:dashboard-draft:${userId}:${dashboardKey}`;
 }
 
 export function createDefaultDashboardDraft(
@@ -119,7 +135,7 @@ export function createDefaultDashboardDraft(
   return {
     schemaVersion: DASHBOARD_DRAFT_SCHEMA_VERSION,
     dashboardKey,
-    layout: layout.map((item) => ({ ...item })),
+    pages: [{ id: "page-1", name: "Página 1", layout: layout.map((item) => ({ ...item })) }],
     customWidgets: [],
     savedAt: null,
   };
@@ -133,6 +149,59 @@ export function serializeDashboardDraft(snapshot: DashboardDraftSnapshot): strin
   return JSON.stringify(snapshot);
 }
 
+export function findDashboardItemPlacement(
+  item: DraftLayoutItem,
+  placed: readonly DraftLayoutItem[],
+): DraftLayoutItem | null {
+  const candidates: Array<{ x: number; y: number; distance: number }> = [];
+  for (let y = 0; y <= DASHBOARD_PAGE_MAX_ROWS - item.h; y += 1) {
+    for (let x = 0; x <= 12 - item.w; x += 1) {
+      candidates.push({ x, y, distance: Math.abs(x - item.x) + Math.abs(y - item.y) });
+    }
+  }
+  candidates.sort((left, right) => left.distance - right.distance || left.y - right.y || left.x - right.x);
+  const candidate = candidates.find(({ x, y }) => {
+    const positioned = { ...item, x, y };
+    return placed.every((placedItem) => !layoutItemsCollide(positioned, placedItem));
+  });
+  return candidate ? { ...item, x: candidate.x, y: candidate.y } : null;
+}
+
+function fitPageLayout(items: readonly DraftLayoutItem[]): DraftLayoutItem[] | null {
+  const placed: DraftLayoutItem[] = [];
+  for (const item of items) {
+    const positioned = findDashboardItemPlacement(item, placed);
+    if (!positioned) return null;
+    placed.push(positioned);
+  }
+  return placed;
+}
+
+function migrateLegacyLayout(items: readonly DraftLayoutItem[]): DashboardDraftPage[] | null {
+  const pages: DashboardDraftPage[] = [{ id: "page-1", name: "Página 1", layout: [] }];
+  for (const item of items) {
+    let current = pages.at(-1) as DashboardDraftPage;
+    let positioned = findDashboardItemPlacement(item, current.layout);
+    if (!positioned) {
+      if (pages.length >= DASHBOARD_MAX_PAGES) return null;
+      current = { id: `page-${pages.length + 1}`, name: `Página ${pages.length + 1}`, layout: [] };
+      pages.push(current);
+      positioned = findDashboardItemPlacement(item, current.layout);
+    }
+    if (!positioned) return null;
+    current.layout.push(positioned);
+  }
+  return pages;
+}
+
+function sanitizePageIdentity(value: unknown): Pick<DashboardDraftPage, "id" | "name"> | null {
+  if (!isRecord(value)) return null;
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  const name = typeof value.name === "string" ? value.name.trim() : "";
+  if (!/^page-[a-zA-Z0-9-]{1,80}$/.test(id) || name.length < 1 || name.length > 40) return null;
+  return { id, name };
+}
+
 export function parseDashboardDraft(
   raw: string,
   expectedDashboardKey: DashboardKey,
@@ -141,30 +210,54 @@ export function parseDashboardDraft(
   try {
     const value: unknown = JSON.parse(raw);
     if (!isRecord(value)) return null;
-    if (value.schemaVersion !== DASHBOARD_DRAFT_SCHEMA_VERSION || value.dashboardKey !== expectedDashboardKey) return null;
-    if (!Array.isArray(value.layout) || !Array.isArray(value.customWidgets)) return null;
+    if (value.dashboardKey !== expectedDashboardKey || !Array.isArray(value.customWidgets)) return null;
+    if (value.schemaVersion !== 1 && value.schemaVersion !== DASHBOARD_DRAFT_SCHEMA_VERSION) return null;
 
     const widgets = value.customWidgets.map(sanitizeWidget);
     if (widgets.some((widget) => widget === null)) return null;
     const validWidgets = widgets as DraftCustomWidget[];
     const allowedIds = new Set([...defaultLayout.map((item) => item.i), ...validWidgets.map((widget) => widget.id)]);
-    const seenIds = new Set<string>();
-    const parsedLayout: DraftLayoutItem[] = [];
+    const seenItemIds = new Set<string>();
+    const sanitizeItems = (rawItems: unknown[]): DraftLayoutItem[] | null => {
+      const items: DraftLayoutItem[] = [];
+      for (const rawItem of rawItems) {
+        const item = sanitizeLayoutItem(rawItem);
+        if (!item || !allowedIds.has(item.i) || seenItemIds.has(item.i)) return null;
+        seenItemIds.add(item.i);
+        items.push(item);
+      }
+      return items;
+    };
 
-    for (const rawItem of value.layout) {
-      const item = sanitizeLayoutItem(rawItem);
-      if (!item || !allowedIds.has(item.i) || seenIds.has(item.i)) return null;
-      seenIds.add(item.i);
-      parsedLayout.push(item);
+    let pages: DashboardDraftPage[];
+    if (value.schemaVersion === 1) {
+      if (!Array.isArray(value.layout)) return null;
+      const legacyItems = sanitizeItems(value.layout);
+      const migrated = legacyItems ? migrateLegacyLayout(legacyItems) : null;
+      if (!migrated) return null;
+      pages = migrated;
+    } else {
+      if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > DASHBOARD_MAX_PAGES) return null;
+      const seenPageIds = new Set<string>();
+      pages = [];
+      for (const rawPage of value.pages) {
+        const identity = sanitizePageIdentity(rawPage);
+        if (!identity || seenPageIds.has(identity.id) || !isRecord(rawPage) || !Array.isArray(rawPage.layout)) return null;
+        seenPageIds.add(identity.id);
+        const items = sanitizeItems(rawPage.layout);
+        const layout = items ? fitPageLayout(items) : null;
+        if (!layout) return null;
+        pages.push({ ...identity, layout });
+      }
     }
 
-    if (allowedIds.size !== seenIds.size) return null;
+    if (allowedIds.size !== seenItemIds.size) return null;
     if (value.savedAt !== null && (typeof value.savedAt !== "string" || Number.isNaN(Date.parse(value.savedAt)))) return null;
 
     return {
       schemaVersion: DASHBOARD_DRAFT_SCHEMA_VERSION,
       dashboardKey: expectedDashboardKey,
-      layout: resolveDashboardLayoutCollisions(parsedLayout),
+      pages,
       customWidgets: validWidgets,
       savedAt: value.savedAt as string | null,
     };
@@ -174,5 +267,25 @@ export function parseDashboardDraft(
 }
 
 export function dashboardDraftsEqual(left: DashboardDraftSnapshot, right: DashboardDraftSnapshot): boolean {
-  return JSON.stringify({ layout: left.layout, customWidgets: left.customWidgets }) === JSON.stringify({ layout: right.layout, customWidgets: right.customWidgets });
+  return JSON.stringify({ pages: left.pages, customWidgets: left.customWidgets }) === JSON.stringify({ pages: right.pages, customWidgets: right.customWidgets });
+}
+
+export function dashboardPageLayoutsEqual(
+  left: readonly DraftLayoutItem[],
+  right: readonly DraftLayoutItem[],
+): boolean {
+  if (left.length !== right.length) return false;
+  const rightById = new Map(right.map((item) => [item.i, item]));
+  return left.every((item) => {
+    const candidate = rightById.get(item.i);
+    return Boolean(candidate)
+      && item.x === candidate?.x
+      && item.y === candidate?.y
+      && item.w === candidate?.w
+      && item.h === candidate?.h
+      && item.minW === candidate?.minW
+      && item.minH === candidate?.minH
+      && item.maxW === candidate?.maxW
+      && item.maxH === candidate?.maxH;
+  });
 }

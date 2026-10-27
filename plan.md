@@ -21,6 +21,10 @@ Plataforma interna de análise dos indicadores de TI da UPA, sem qualquer funç�
 - Métricas oficiais continuam disponíveis como modelos explicados, mas não limitam a criação de métricas pessoais.
 - Painéis oficiais com fluxo de rascunho e publicação.
 - Layout em grade, com drag-and-drop real, troca livre de ordem e posição e redimensionamento pelas quatro laterais e quatro cantos, sem sobreposição.
+- O drag-and-drop usa encaixe magnético suave: blocos a até uma célula de uma borda livre se conectam, enquanto distâncias maiores preservam a posição escolhida pelo usuário.
+- Cada painel pode conter até 12 páginas pessoais, navegadas na barra de filtros. A primeira preserva a composição existente e páginas adicionais começam vazias.
+- Cada página possui um canvas lógico fixo de 12 colunas por 13 linhas; movimentos ou redimensionamentos que ultrapassem esse limite são revertidos, e o magnetismo considera somente os blocos da página ativa.
+- Filtros e seleção cruzada pertencem ao painel e permanecem ativos ao alternar entre suas páginas.
 - Cada painel tem uma composição inicial própria, adequada ao tipo de análise, em vez de reutilizar o mesmo arranjo de cartões e gráficos.
 - Cross-filter simples ou múltiplo entre gráficos do painel atual.
 - Detalhamento dos chamados que compõem uma seleção.
