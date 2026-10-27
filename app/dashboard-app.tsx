@@ -174,7 +174,35 @@ type OverviewLoadState =
   | { status: "ready"; data: OverviewAnalytics; message: string }
   | { status: "empty" | "error"; data: null; message: string };
 
-async function loadOverviewAnalytics(filters: Filters, crossFilter: OverviewCrossFilter | null, signal?: AbortSignal): Promise<OverviewAnalytics | null> {
+type OverviewDetailRow = {
+  rowKey: string;
+  code: string;
+  requester: string;
+  sector: string;
+  priority: string;
+  status: string;
+  reason: string;
+  openedAt: string | null;
+};
+
+type OverviewDetails = {
+  snapshot: { id: string; publishedAt: string };
+  selection: {
+    totalRecords: number;
+    page: number;
+    pageSize: number;
+    pageCount: number;
+  };
+  privacy: { requesterMasked: boolean };
+  rows: OverviewDetailRow[];
+};
+
+type OverviewDetailsLoadState =
+  | { status: "loading"; data: null; message: string }
+  | { status: "ready"; data: OverviewDetails; message: string }
+  | { status: "empty" | "error"; data: null; message: string };
+
+function createOverviewSearchParams(filters: Filters, crossFilter: OverviewCrossFilter | null): URLSearchParams {
   const searchParams = new URLSearchParams();
   searchParams.set("period", filters.period === "Últimos 30 dias" ? "last30" : filters.period === "Últimos 90 dias" ? "last90" : "all");
   if (filters.sector !== defaultFilters.sector) searchParams.set("sector", filters.sector);
@@ -183,10 +211,32 @@ async function loadOverviewAnalytics(filters: Filters, crossFilter: OverviewCros
   if (crossFilter?.field === "status") searchParams.set("status", crossFilter.value);
   else if (filters.status !== defaultFilters.status) searchParams.set("status", filters.status);
   if (crossFilter?.field === "reason") searchParams.set("reason", crossFilter.value);
+  return searchParams;
+}
+
+async function loadOverviewAnalytics(filters: Filters, crossFilter: OverviewCrossFilter | null, signal?: AbortSignal): Promise<OverviewAnalytics | null> {
+  const searchParams = createOverviewSearchParams(filters, crossFilter);
   const response = await fetch(`/api/analytics/overview?${searchParams}`, { cache: "no-store", signal });
   const payload = await response.json().catch(() => null) as { ok?: boolean; data?: OverviewAnalytics | null; error?: string } | null;
   if (!response.ok || !payload?.ok) {
     throw new Error(payload?.error ?? "Não foi possível carregar a Visão geral.");
+  }
+  return payload.data ?? null;
+}
+
+async function loadOverviewDetails(
+  filters: Filters,
+  crossFilter: OverviewCrossFilter | null,
+  page: number,
+  signal?: AbortSignal,
+): Promise<OverviewDetails | null> {
+  const searchParams = createOverviewSearchParams(filters, crossFilter);
+  searchParams.set("page", String(page));
+  searchParams.set("pageSize", "20");
+  const response = await fetch(`/api/analytics/overview/details?${searchParams}`, { cache: "no-store", signal });
+  const payload = await response.json().catch(() => null) as { ok?: boolean; data?: OverviewDetails | null; error?: string } | null;
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error ?? "Não foi possível carregar os chamados deste recorte.");
   }
   return payload.data ?? null;
 }
@@ -460,12 +510,12 @@ function MetricCard({ title, value, delta, tone = "default", editing, onOpen }: 
   );
 }
 
-function WidgetFrame({ title, subtitle, editing, children, action, detailsEnabled = true }: { title: string; subtitle?: string; editing: boolean; children: React.ReactNode; action?: React.ReactNode; detailsEnabled?: boolean }) {
+function WidgetFrame({ title, subtitle, editing, children, action, detailsEnabled = true, onDetails }: { title: string; subtitle?: string; editing: boolean; children: React.ReactNode; action?: React.ReactNode; detailsEnabled?: boolean; onDetails?: () => void }) {
   return (
     <section className={cn("widget", editing && "widget--editing")}>
       <header className="widget__header widget-drag-handle">
         <span><strong>{title}</strong>{subtitle && <small>{subtitle}</small>}</span>
-        <span className="widget__actions">{action}{editing && <DotsSixVerticalIcon className="drag-grip" size={17} weight="bold" />}<button aria-label="Abrir detalhes" disabled={!detailsEnabled} title={detailsEnabled ? "Abrir detalhes" : "Detalhamento real será habilitado em uma próxima etapa."}><ArrowUpRightIcon size={16} /></button></span>
+        <span className="widget__actions">{action}{editing && <DotsSixVerticalIcon className="drag-grip" size={17} weight="bold" />}<button aria-label="Abrir detalhes" disabled={!detailsEnabled} title={detailsEnabled ? "Abrir chamados do recorte" : "Detalhamento indisponível enquanto os dados são carregados."} onClick={(event) => { event.stopPropagation(); onDetails?.(); }}><ArrowUpRightIcon size={16} /></button></span>
       </header>
       <div className="widget__content">{children}</div>
     </section>
@@ -524,6 +574,7 @@ function renderDashboardWidgets(
   setCrossFilter: (value: string) => void,
   onOverviewCrossFilter: (field: OverviewCrossFilter["field"], value: string) => void,
   overviewState: OverviewLoadState,
+  onOpenOverviewDetails: () => void,
 ) {
   const chartGrid = <CartesianGrid stroke="#edf0ed" vertical={false} />;
   const paretoTotal = reasonData.reduce((sum, item) => sum + item.value, 0);
@@ -563,7 +614,7 @@ function renderDashboardWidgets(
     const completedPercentLabel = `${formatMetricNumber(completedPercent)}%`;
     return [
       <div key="overview-demand">
-        <WidgetFrame title="Evolução da demanda" subtitle={`Aberturas e conclusões · por ${analytics.demand.granularity === "day" ? "dia" : "mês"}`} editing={editing} detailsEnabled={false} action={<span className="coverage-badge">Cobertura {formatMetricNumber(analytics.cards.averagePerCalendarDay.coveragePercent)}%</span>}>
+        <WidgetFrame title="Evolução da demanda" subtitle={`Aberturas e conclusões · por ${analytics.demand.granularity === "day" ? "dia" : "mês"}`} editing={editing} onDetails={onOpenOverviewDetails} action={<span className="coverage-badge">Cobertura {formatMetricNumber(analytics.cards.averagePerCalendarDay.coveragePercent)}%</span>}>
           {hasMatchingTickets && liveDemand.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={liveDemand} margin={{ top: 10, right: 6, left: -24, bottom: 0 }}>
               {chartGrid}
@@ -577,7 +628,7 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="overview-status">
-        <WidgetFrame title="Distribuição por status" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.status.coveragePercent)}% · clique para cruzar`} editing={editing} detailsEnabled={false}>
+        <WidgetFrame title="Distribuição por status" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.status.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={onOpenOverviewDetails}>
           {liveStatus.length > 0 ? <div className="donut-wrap">
             <ResponsiveContainer width="100%" height="55%">
               <PieChart>
@@ -593,7 +644,7 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="overview-reason">
-        <WidgetFrame title="Chamados por motivo" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.reason.coveragePercent)}% · clique para cruzar`} editing={editing} detailsEnabled={false}>
+        <WidgetFrame title="Chamados por motivo" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.reason.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={onOpenOverviewDetails}>
           {liveReasons.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={liveReasons} layout="vertical" margin={{ top: 4, right: 22, left: 2, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ed" horizontal={false} />
@@ -606,7 +657,7 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="overview-priority">
-        <WidgetFrame title="Distribuição por prioridade" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.priority.coveragePercent)}% · clique para cruzar`} editing={editing} detailsEnabled={false} action={<span className="sample-badge">N = {analytics.cards.totalTickets}</span>}>
+        <WidgetFrame title="Distribuição por prioridade" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.priority.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={onOpenOverviewDetails} action={<span className="sample-badge">N = {analytics.cards.totalTickets}</span>}>
           {livePriority.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={livePriority} margin={{ top: 8, right: 26, left: -24, bottom: 0 }}>
               {chartGrid}
@@ -1246,11 +1297,11 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
 
             {visibleMetrics.map((metric) => (
               <div key={metric.id}>
-                <MetricCard title={metric.title} value={metric.value} delta={metric.delta} tone={metric.tone} editing={editing} onOpen={() => dashboardKey === "overview" ? flash("O detalhamento real será conectado em uma próxima etapa") : setDetailsOpen(true)} />
+                <MetricCard title={metric.title} value={metric.value} delta={metric.delta} tone={metric.tone} editing={editing} onOpen={() => setDetailsOpen(true)} />
               </div>
             ))}
 
-            {renderDashboardWidgets(dashboardKey, editing, scaledDemand, setCrossFilter, applyOverviewCrossFilter, overviewState)}
+            {renderDashboardWidgets(dashboardKey, editing, scaledDemand, setCrossFilter, applyOverviewCrossFilter, overviewState, () => setDetailsOpen(true))}
 
             {customWidgets.map((widget) => (
               <div key={widget.id}>
@@ -1303,7 +1354,9 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
       </div>
 
       {builderOpen && <IndicatorBuilder dashboardKey={dashboardKey} initialDefinition={builderWidget?.definition} onClose={closeBuilder} onSubmit={builderWidget ? updateWidget : addWidget} />}
-      {detailsOpen && <DetailsDrawer crossFilter={crossFilter} onClose={() => setDetailsOpen(false)} />}
+      {detailsOpen && (dashboardKey === "overview"
+        ? <OverviewDetailsDrawer filters={filters} crossFilter={overviewCrossFilter} onClose={() => setDetailsOpen(false)} />
+        : <DetailsDrawer crossFilter={crossFilter} onClose={() => setDetailsOpen(false)} />)}
       {toast && <div className="toast"><CheckCircleIcon size={19} weight="fill" />{toast}</div>}
     </div>
   );
@@ -1516,6 +1569,88 @@ function IndicatorBuilder({ dashboardKey, initialDefinition, onClose, onSubmit }
         </div>
         <footer><span className="builder-footer-status">{effectivePreviewStatus === "validating" ? "Validando AST no servidor..." : readyToSubmit ? "Fórmula válida e prévia confirmada" : displayedErrors.length > 0 ? `${displayedErrors.length} validação(ões) pendente(s)` : "Aguardando validação do servidor..."}</span><button className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={!readyToSubmit} onClick={() => { if (activePreview) onSubmit(definition, activePreview); }}>{isEditingMetric ? <FloppyDiskIcon size={16} /> : <PlusIcon size={16} />}{isEditingMetric ? "Atualizar no rascunho" : "Adicionar ao rascunho"}</button></footer>
       </section>
+    </div>
+  );
+}
+
+function formatDetailDateTime(value: string | null): string {
+  if (!value) return "Não informada";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Não informada";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "America/Sao_Paulo",
+  }).format(parsed);
+}
+
+function OverviewDetailsDrawer({ filters, crossFilter, onClose }: { filters: Filters; crossFilter: OverviewCrossFilter | null; onClose: () => void }) {
+  const [page, setPage] = useState(1);
+  const [reload, setReload] = useState(0);
+  const [state, setState] = useState<OverviewDetailsLoadState>({
+    status: "loading",
+    data: null,
+    message: "Consultando os chamados do recorte.",
+  });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadOverviewDetails(filters, crossFilter, page, controller.signal)
+      .then((data) => setState(data
+        ? { status: "ready", data, message: "Detalhamento carregado." }
+        : { status: "empty", data: null, message: "Ainda não existe um snapshot publicado para detalhar." }))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setState({
+          status: "error",
+          data: null,
+          message: error instanceof Error ? error.message : "Não foi possível carregar o detalhamento.",
+        });
+      });
+    return () => controller.abort();
+  }, [crossFilter, filters, page, reload]);
+
+  const data = state.status === "ready" ? state.data : null;
+  const selectionLabel = crossFilter
+    ? `${overviewCrossFilterLabels[crossFilter.field]} cruzado: ${crossFilter.value}`
+    : "Filtros atuais da Visão geral";
+
+  return (
+    <div className="drawer-layer" onMouseDown={onClose}>
+      <aside className="details-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label="Detalhamento dos chamados">
+        <header><div><p className="eyebrow">Detalhamento real</p><h2>Chamados do recorte</h2><span>{selectionLabel}</span></div><button aria-label="Fechar detalhamento" onClick={onClose}><XIcon size={18} /></button></header>
+        <div className="drawer-summary">
+          <span><strong>{data ? data.selection.totalRecords.toLocaleString("pt-BR") : "—"}</strong><small>registros no recorte</small></span>
+          <span><strong>{data ? `${data.selection.page}/${data.selection.pageCount}` : "—"}</strong><small>página atual</small></span>
+          <span><strong>{data ? formatDetailDateTime(data.snapshot.publishedAt) : "—"}</strong><small>snapshot publicado</small></span>
+        </div>
+        <div className="privacy-note"><ShieldCheckIcon size={17} /><span><strong>Dados pessoais protegidos</strong><small>{data?.privacy.requesterMasked ? "Solicitantes permanecem mascarados para o perfil Analista." : "O perfil Administrador visualiza somente a identificação necessária; emails e IDs internos não são enviados."}</small></span></div>
+        {state.status !== "ready" ? (
+          <div className={`details-state details-state--${state.status}`} role="status">
+            {state.status === "loading" ? <ArrowsClockwiseIcon className="spin" size={25} /> : state.status === "error" ? <WarningCircleIcon size={25} /> : <DatabaseIcon size={25} />}
+            <strong>{state.status === "loading" ? "Carregando chamados" : state.status === "error" ? "Detalhamento indisponível" : "Nenhum snapshot publicado"}</strong>
+            <span>{state.message}</span>
+            {state.status === "error" && <button className="button button--ghost" onClick={() => { setState({ status: "loading", data: null, message: "Consultando os chamados do recorte." }); setReload((value) => value + 1); }}>Tentar novamente</button>}
+          </div>
+        ) : state.data.rows.length === 0 ? (
+          <div className="details-state details-state--empty" role="status"><InfoIcon size={25} /><strong>Nenhum chamado neste recorte</strong><span>Revise os filtros ou remova a seleção cruzada para ampliar a consulta.</span></div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Chamado</th><th>Solicitante</th><th>Setor</th><th>Prioridade</th><th>Status</th><th>Abertura</th></tr></thead>
+              <tbody>{state.data.rows.map((row) => <tr key={row.rowKey}><td><strong>{row.code}</strong><small>{row.reason}</small></td><td>{row.requester}</td><td>{row.sector}</td><td><span className={cn("priority-tag", `priority-tag--${normalizedAnalyticalLabel(row.priority).replace(/\s+/g, "-")}`)}>{row.priority}</span></td><td>{row.status}</td><td>{formatDetailDateTime(row.openedAt)}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        <footer>
+          <button className="button button--ghost" disabled title="A exportação segura será implementada em uma fatia própria."><DownloadSimpleIcon size={16} />Exportar CSV</button>
+          <div className="drawer-pagination">
+            <button className="button button--ghost" disabled={!data || data.selection.page <= 1 || state.status === "loading"} onClick={() => { setState({ status: "loading", data: null, message: "Consultando os chamados do recorte." }); setPage((value) => Math.max(1, value - 1)); }}>Anterior</button>
+            <button className="button button--ghost" disabled={!data || data.selection.page >= data.selection.pageCount || state.status === "loading"} onClick={() => { setState({ status: "loading", data: null, message: "Consultando os chamados do recorte." }); setPage((value) => value + 1); }}>Próxima</button>
+          </div>
+          <button className="button button--primary" onClick={onClose}>Fechar</button>
+        </footer>
+      </aside>
     </div>
   );
 }

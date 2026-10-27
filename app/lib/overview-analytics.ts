@@ -68,6 +68,15 @@ export type OverviewAnalytics = {
   };
 };
 
+export type OverviewTicketSelection = {
+  filters: OverviewAnalyticsFilters;
+  allTickets: readonly NormalizedNotionRecord[];
+  tickets: NormalizedNotionRecord[];
+  periodStart: string | null;
+  periodEnd: string | null;
+  options: OverviewAnalytics["selection"]["options"];
+};
+
 const saoPauloDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo",
   year: "numeric",
@@ -327,11 +336,10 @@ function demandSeries(
   return { granularity, points };
 }
 
-export function calculateOverviewAnalytics(
-  snapshot: AnalyticalSnapshot,
-  dataset: Pick<SnapshotDataset, "tickets" | "history">,
+export function selectOverviewTickets(
+  dataset: Pick<SnapshotDataset, "tickets">,
   requestedFilters: Partial<OverviewAnalyticsFilters> = {},
-): OverviewAnalytics {
+): OverviewTicketSelection {
   const filters = normalizeFilters(requestedFilters);
   const allTickets = dataset.tickets;
   const allOpenedKeys = allTickets.flatMap((record) => {
@@ -357,6 +365,28 @@ export function calculateOverviewAnalytics(
       && matchesCategory(record, "ticket.status", filters.status)
       && matchesCategory(record, "ticket.reason", filters.reason);
   });
+
+  return {
+    filters,
+    allTickets,
+    tickets,
+    periodStart,
+    periodEnd,
+    options: {
+      sectors: filterOptions(allTickets, "ticket.sector"),
+      priorities: filterOptions(allTickets, "ticket.priority", true),
+      statuses: filterOptions(allTickets, "ticket.status"),
+    },
+  };
+}
+
+export function calculateOverviewAnalytics(
+  snapshot: AnalyticalSnapshot,
+  dataset: Pick<SnapshotDataset, "tickets" | "history">,
+  requestedFilters: Partial<OverviewAnalyticsFilters> = {},
+): OverviewAnalytics {
+  const selection = selectOverviewTickets(dataset, requestedFilters);
+  const { filters, allTickets, tickets, periodStart, periodEnd } = selection;
   const openedKeys = tickets.flatMap((record) => {
     const value = readDate(record, "ticket.openedAt");
     return value ? [dateKey(value)] : [];
@@ -377,11 +407,7 @@ export function calculateOverviewAnalytics(
       periodStart,
       periodEnd,
       filters,
-      options: {
-        sectors: filterOptions(allTickets, "ticket.sector"),
-        priorities: filterOptions(allTickets, "ticket.priority", true),
-        statuses: filterOptions(allTickets, "ticket.status"),
-      },
+      options: selection.options,
     },
     cards: {
       totalTickets: tickets.length,

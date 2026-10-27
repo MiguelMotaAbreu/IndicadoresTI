@@ -268,6 +268,9 @@ async function runAuditFlow(baseUrl) {
   const anonymousContext = await browser.newContext();
   const administratorContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const administratorPage = await administratorContext.newPage();
+  const analystContext = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+  const analystPage = await analystContext.newPage();
+  const analystPassword = "Senha definitiva Analista QA 789";
 
   async function login(page, email, password) {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -283,6 +286,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousHealth.status() !== 401) throw new Error("A saúde do sistema aceitou uma consulta anônima.");
     const anonymousOverview = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview`);
     if (anonymousOverview.status() !== 401) throw new Error("A visão geral analítica aceitou uma consulta anônima.");
+    const anonymousOverviewDetails = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/details`);
+    if (anonymousOverviewDetails.status() !== 401) throw new Error("O detalhamento analítico aceitou uma consulta anônima.");
     const anonymousSync = await anonymousContext.request.get(`${baseUrl}/api/admin/sync`);
     if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
     const anonymousSyncStart = await anonymousContext.request.post(`${baseUrl}/api/admin/sync`);
@@ -320,34 +325,34 @@ async function runAuditFlow(baseUrl) {
       if (!updateResponse.ok()) throw new Error("Não foi possível preparar os eventos de ativação do teste.");
     }
 
-    const analystContext = await browser.newContext();
-    const analystPage = await analystContext.newPage();
-    try {
-      await login(analystPage, analystEmail, created.temporaryPassword);
-      await analystPage.waitForURL(/\/trocar-senha$/);
-      const forbiddenAudit = await analystContext.request.get(`${baseUrl}/api/admin/audit`);
-      if (forbiddenAudit.status() !== 403) throw new Error("Uma conta Analista consultou a auditoria.");
-      const forbiddenHealth = await analystContext.request.get(`${baseUrl}/api/admin/health`);
-      if (forbiddenHealth.status() !== 403) throw new Error("Uma conta Analista consultou a saúde do sistema.");
-      const analystOverviewBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview`);
-      if (analystOverviewBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a visão geral analítica.");
-      const forbiddenSync = await analystContext.request.get(`${baseUrl}/api/admin/sync`);
-      if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
-      const forbiddenSyncStart = await analystContext.request.post(`${baseUrl}/api/admin/sync`);
-      if (forbiddenSyncStart.status() !== 403) throw new Error("Uma conta Analista iniciou uma sincronização.");
-      const forbiddenSyncRecovery = await analystContext.request.post(`${baseUrl}/api/admin/sync/recovery`);
-      if (forbiddenSyncRecovery.status() !== 403) throw new Error("Uma conta Analista recuperou uma sincronização.");
-      const forbiddenConnectionTest = await analystContext.request.post(`${baseUrl}/api/admin/sync/connection`);
-      if (forbiddenConnectionTest.status() !== 403) throw new Error("Uma conta Analista testou a conexão com o Notion.");
-      const forbiddenMapping = await analystContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
-      if (forbiddenMapping.status() !== 403) throw new Error("Uma conta Analista consultou os mapeamentos.");
-      const forbiddenMappingUpdate = await analystContext.request.put(`${baseUrl}/api/admin/sync/mapping`, { data: { mappings: {} } });
-      if (forbiddenMappingUpdate.status() !== 403) throw new Error("Uma conta Analista alterou os mapeamentos.");
-      const forbiddenPreflight = await analystContext.request.post(`${baseUrl}/api/admin/sync/preflight`);
-      if (forbiddenPreflight.status() !== 403) throw new Error("Uma conta Analista executou a pré-validação.");
-    } finally {
-      await analystContext.close();
-    }
+    await login(analystPage, analystEmail, created.temporaryPassword);
+    await analystPage.waitForURL(/\/trocar-senha$/);
+    const forbiddenAudit = await analystContext.request.get(`${baseUrl}/api/admin/audit`);
+    if (forbiddenAudit.status() !== 403) throw new Error("Uma conta Analista consultou a auditoria.");
+    const forbiddenHealth = await analystContext.request.get(`${baseUrl}/api/admin/health`);
+    if (forbiddenHealth.status() !== 403) throw new Error("Uma conta Analista consultou a saúde do sistema.");
+    const analystOverviewBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview`);
+    if (analystOverviewBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a visão geral analítica.");
+    const analystDetailsBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/details`);
+    if (analystDetailsBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou o detalhamento analítico.");
+    const forbiddenSync = await analystContext.request.get(`${baseUrl}/api/admin/sync`);
+    if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
+    const forbiddenSyncStart = await analystContext.request.post(`${baseUrl}/api/admin/sync`);
+    if (forbiddenSyncStart.status() !== 403) throw new Error("Uma conta Analista iniciou uma sincronização.");
+    const forbiddenSyncRecovery = await analystContext.request.post(`${baseUrl}/api/admin/sync/recovery`);
+    if (forbiddenSyncRecovery.status() !== 403) throw new Error("Uma conta Analista recuperou uma sincronização.");
+    const forbiddenConnectionTest = await analystContext.request.post(`${baseUrl}/api/admin/sync/connection`);
+    if (forbiddenConnectionTest.status() !== 403) throw new Error("Uma conta Analista testou a conexão com o Notion.");
+    const forbiddenMapping = await analystContext.request.get(`${baseUrl}/api/admin/sync/mapping`);
+    if (forbiddenMapping.status() !== 403) throw new Error("Uma conta Analista consultou os mapeamentos.");
+    const forbiddenMappingUpdate = await analystContext.request.put(`${baseUrl}/api/admin/sync/mapping`, { data: { mappings: {} } });
+    if (forbiddenMappingUpdate.status() !== 403) throw new Error("Uma conta Analista alterou os mapeamentos.");
+    const forbiddenPreflight = await analystContext.request.post(`${baseUrl}/api/admin/sync/preflight`);
+    if (forbiddenPreflight.status() !== 403) throw new Error("Uma conta Analista executou a pré-validação.");
+    await analystPage.getByLabel("Nova senha", { exact: true }).fill(analystPassword);
+    await analystPage.getByLabel("Confirme a nova senha").fill(analystPassword);
+    await analystPage.getByRole("button", { name: "Salvar e acessar os painéis" }).click();
+    await analystPage.getByRole("heading", { name: "Catálogo de painéis" }).waitFor();
 
     if (!externalBaseUrl) {
       const missingConfigurationTest = await administratorContext.request.post(`${baseUrl}/api/admin/sync/connection`);
@@ -479,6 +484,9 @@ async function runAuditFlow(baseUrl) {
               pageId: "qa-ticket-one",
               fields: {
                 "ticket.openedAt": { state: "valid", value: { kind: "date", value: "2026-10-01T10:00:00-03:00" } },
+                "ticket.externalCode": { state: "valid", value: { kind: "text", value: "TKT-001" } },
+                "ticket.requester": { state: "valid", value: { kind: "text", value: "Maria da Silva" } },
+                "ticket.requesterEmail": { state: "valid", value: { kind: "text", value: "maria.qa@example.invalid" } },
                 "ticket.status": { state: "valid", value: { kind: "text", value: "Concluído" } },
                 "ticket.priority": { state: "valid", value: { kind: "text", value: "Alta" } },
                 "ticket.sector": { state: "valid", value: { kind: "text", value: "Recepção" } },
@@ -491,6 +499,9 @@ async function runAuditFlow(baseUrl) {
               pageId: "qa-ticket-two",
               fields: {
                 "ticket.openedAt": { state: "valid", value: { kind: "date", value: "2026-10-02T10:00:00-03:00" } },
+                "ticket.externalCode": { state: "valid", value: { kind: "text", value: "TKT-002" } },
+                "ticket.requester": { state: "valid", value: { kind: "text", value: "João Souza" } },
+                "ticket.requesterEmail": { state: "valid", value: { kind: "text", value: "joao.qa@example.invalid" } },
                 "ticket.status": { state: "valid", value: { kind: "text", value: "Aguardando informação" } },
                 "ticket.priority": { state: "valid", value: { kind: "text", value: "Média" } },
                 "ticket.sector": { state: "valid", value: { kind: "text", value: "Farmácia" } },
@@ -539,6 +550,39 @@ async function runAuditFlow(baseUrl) {
       }
       const invalidFilterResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview?period=invalid`);
       if (invalidFilterResponse.status() !== 400) throw new Error("A visão geral aceitou um período analítico inválido.");
+
+      const detailsResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/details?period=all&page=1&pageSize=1`);
+      if (!detailsResponse.ok()) throw new Error("O Administrador não conseguiu consultar o detalhamento analítico.");
+      const detailsPayload = await detailsResponse.json();
+      if (
+        detailsPayload.data?.selection?.totalRecords !== 2
+        || detailsPayload.data?.selection?.pageCount !== 2
+        || detailsPayload.data?.rows?.[0]?.code !== "TKT-002"
+        || detailsPayload.data?.rows?.[0]?.requester !== "João Souza"
+        || detailsPayload.data?.privacy?.requesterMasked !== false
+      ) {
+        throw new Error("O detalhamento do Administrador não respeitou ordenação, paginação ou perfil.");
+      }
+      const serializedDetails = JSON.stringify(detailsPayload);
+      if (serializedDetails.includes("qa-ticket") || serializedDetails.includes("@example.invalid") || serializedDetails.includes("requesterEmail")) {
+        throw new Error("O detalhamento expôs ID interno ou email do solicitante.");
+      }
+      const filteredDetailsResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/details?period=all&sector=${encodeURIComponent("Farmácia")}&priority=${encodeURIComponent("Média")}&status=${encodeURIComponent("Aguardando informação")}&reason=${encodeURIComponent("Computador")}`);
+      const filteredDetails = await filteredDetailsResponse.json();
+      if (!filteredDetailsResponse.ok() || filteredDetails.data?.selection?.totalRecords !== 1 || filteredDetails.data?.rows?.[0]?.code !== "TKT-002") {
+        throw new Error("O detalhamento não reutilizou o recorte combinado da Visão geral.");
+      }
+      const analystDetailsResponse = await analystContext.request.get(`${baseUrl}/api/analytics/overview/details`);
+      const analystDetails = await analystDetailsResponse.json();
+      if (
+        !analystDetailsResponse.ok()
+        || analystDetails.data?.privacy?.requesterMasked !== true
+        || analystDetails.data?.rows?.some((row) => row.requester !== "Solicitante protegido")
+      ) {
+        throw new Error("O detalhamento não mascarou solicitantes para a conta Analista.");
+      }
+      const invalidDetailsResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/details?pageSize=51`);
+      if (invalidDetailsResponse.status() !== 400) throw new Error("O detalhamento aceitou paginação acima do limite seguro.");
     }
     await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();
     await administratorPage.getByRole("heading", { name: "Mapeamentos do Notion" }).waitFor();
@@ -633,19 +677,37 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByRole("button", { name: "Limpar filtros" }).click();
       await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
+      await metricCards.filter({ hasText: "Total de chamados" }).click();
+      const detailsDrawer = administratorPage.getByLabel("Detalhamento dos chamados");
+      await detailsDrawer.getByRole("heading", { name: "Chamados do recorte" }).waitFor();
+      await detailsDrawer.getByText("TKT-002", { exact: true }).waitFor();
+      await detailsDrawer.getByText("João Souza", { exact: true }).waitFor();
+      if (await detailsDrawer.getByText(/@example\.invalid/).count()) {
+        throw new Error("O drawer exibiu email do solicitante.");
+      }
+      await detailsDrawer.getByRole("button", { name: "Fechar", exact: true }).click();
       await administratorPage.locator(".legend-list button").filter({ hasText: "Concluído" }).click();
       await metricCards.filter({ hasText: "Total de chamados" }).getByText("1", { exact: true }).waitFor();
       await administratorPage.getByRole("button", { name: "Status cruzado: Concluído" }).waitFor();
       await administratorPage.getByText("Recorte: 1/2", { exact: false }).waitFor();
       await assertDonutCenterFits(administratorPage);
+      await administratorPage.locator(".widget").filter({ hasText: "Distribuição por status" }).getByRole("button", { name: "Abrir detalhes" }).click();
+      const filteredDrawer = administratorPage.getByLabel("Detalhamento dos chamados");
+      await filteredDrawer.getByText("Status cruzado: Concluído", { exact: true }).waitFor();
+      await filteredDrawer.getByText("TKT-001", { exact: true }).waitFor();
+      if (await filteredDrawer.getByText("TKT-002", { exact: true }).count()) {
+        throw new Error("O drawer ignorou a seleção cruzada por status.");
+      }
+      await filteredDrawer.getByRole("button", { name: "Fechar", exact: true }).click();
       await administratorPage.getByRole("button", { name: "Status cruzado: Concluído" }).click();
       await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
     }
 
-    process.stdout.write("QA concluído: auditoria, autorização, saúde, Visão geral real com filtros e cruzamentos, mapeamentos e sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, saúde, Visão geral real, detalhamento protegido, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
+    await analystContext.close();
     await administratorContext.close();
     await browser.close();
   }

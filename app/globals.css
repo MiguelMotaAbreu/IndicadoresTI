@@ -417,6 +417,11 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .privacy-note strong { color: var(--ink); font-size: 9px; }
 .privacy-note small { color: var(--ink-soft); font-size: 8px; }
 .table-wrap { overflow: auto; padding: 0 24px; }
+.details-state { min-height: 240px; display: grid; place-content: center; justify-items: center; gap: 7px; padding: 24px; color: var(--ink-faint); text-align: center; }
+.details-state strong { color: var(--ink); font-size: 11px; }
+.details-state span { max-width: 360px; font-size: 9px; line-height: 1.5; }
+.details-state--error { color: #a9424d; }
+.details-state .button { margin-top: 6px; }
 table { width: 100%; border-collapse: collapse; }
 th { position: sticky; top: 0; background: white; color: var(--ink-faint); font-size: 8px; letter-spacing: 0.4px; text-align: left; text-transform: uppercase; }
 th, td { border-bottom: 1px solid var(--line); padding: 11px 8px; }
@@ -429,6 +434,7 @@ td:first-child small { color: var(--ink-faint); font-size: 8px; }
 .priority-tag--muito-alta { background: #fbece5; color: #b4513b; }
 .priority-tag--alta { background: var(--amber-soft); color: #94631a; }
 .details-drawer > footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); padding: 13px 24px; }
+.drawer-pagination { display: flex; gap: 6px; margin-left: auto; }
 .toast { position: fixed; top: 90px; left: 50%; z-index: 140; display: flex; align-items: center; gap: 8px; border-radius: 11px; background: var(--green-900); color: white; box-shadow: var(--shadow-md); padding: 12px 15px; font-size: 10px; pointer-events: none; transform: translateX(-50%); animation: toast-in 220ms ease-out; }
 
 .admin-badge { display: flex; align-items: center; gap: 6px; border-radius: 99px; background: var(--green-50); color: var(--green-800); padding: 7px 10px; font-size: 9px; font-weight: 700; }
@@ -685,6 +691,11 @@ td:first-child small { color: var(--ink-faint); font-size: 8px; }
 }
 
 @media (max-width: 860px) {
+  .details-drawer { width: 100vw; }
+  .drawer-summary { overflow-x: auto; }
+  .drawer-summary span { min-width: 115px; }
+  .details-drawer > footer { flex-wrap: wrap; }
+  .drawer-pagination { order: 3; width: 100%; justify-content: flex-end; }
   .admin-layout { grid-template-columns: 1fr; }
   .admin-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .admin-nav button { min-width: 145px; }
