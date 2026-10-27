@@ -31,6 +31,13 @@ function hasProcessExited(childProcess) {
   return childProcess.exitCode !== null || childProcess.signalCode !== null;
 }
 
+function rectanglesOverlap(left, right) {
+  return left.x < right.x + right.width
+    && left.x + left.width > right.x
+    && left.y < right.y + right.height
+    && left.y + left.height > right.y;
+}
+
 function rememberApplicationOutput(chunk) {
   applicationOutput = `${applicationOutput}${chunk.toString()}`.slice(-12_000);
 }
@@ -444,6 +451,7 @@ async function runAuditFlow(baseUrl) {
                 "ticket.openedAt": { state: "valid", value: { kind: "date", value: "2026-10-01T10:00:00-03:00" } },
                 "ticket.status": { state: "valid", value: { kind: "text", value: "Concluído" } },
                 "ticket.priority": { state: "valid", value: { kind: "text", value: "Alta" } },
+                "ticket.sector": { state: "valid", value: { kind: "text", value: "Recepção" } },
                 "ticket.reason": { state: "valid", value: { kind: "text", value: "Impressora" } },
                 "ticket.slaStatus": { state: "valid", value: { kind: "text", value: "Dentro do prazo" } },
               },
@@ -455,6 +463,7 @@ async function runAuditFlow(baseUrl) {
                 "ticket.openedAt": { state: "valid", value: { kind: "date", value: "2026-10-02T10:00:00-03:00" } },
                 "ticket.status": { state: "valid", value: { kind: "text", value: "Aguardando informação" } },
                 "ticket.priority": { state: "valid", value: { kind: "text", value: "Média" } },
+                "ticket.sector": { state: "valid", value: { kind: "text", value: "Farmácia" } },
                 "ticket.reason": { state: "valid", value: { kind: "text", value: "Computador" } },
                 "ticket.slaStatus": { state: "valid", value: { kind: "text", value: "Fora do prazo" } },
               },
@@ -488,6 +497,18 @@ async function runAuditFlow(baseUrl) {
       ) {
         throw new Error("A visão geral não calculou corretamente o snapshot descartável publicado.");
       }
+      const filteredOverviewResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview?period=all&sector=${encodeURIComponent("Farmácia")}&priority=${encodeURIComponent("Média")}&status=${encodeURIComponent("Aguardando informação")}`);
+      if (!filteredOverviewResponse.ok()) throw new Error("A visão geral rejeitou filtros analíticos válidos.");
+      const filteredOverview = await filteredOverviewResponse.json();
+      if (
+        filteredOverview.data?.selection?.matchedTickets !== 1
+        || filteredOverview.data?.cards?.totalTickets !== 1
+        || filteredOverview.data?.selection?.options?.sectors?.length !== 2
+      ) {
+        throw new Error("A visão geral não aplicou corretamente os filtros combinados.");
+      }
+      const invalidFilterResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview?period=invalid`);
+      if (invalidFilterResponse.status() !== 400) throw new Error("A visão geral aceitou um período analítico inválido.");
     }
     await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();
     await administratorPage.getByRole("heading", { name: "Mapeamentos do Notion" }).waitFor();
@@ -527,13 +548,45 @@ async function runAuditFlow(baseUrl) {
       await metricCards.filter({ hasText: "Pendências atuais" }).getByText("1", { exact: true }).waitFor();
       await administratorPage.getByText("Evolução da demanda", { exact: true }).waitFor();
       await administratorPage.getByText("Distribuição por status", { exact: true }).waitFor();
-      await administratorPage.getByText("Base: 2", { exact: false }).waitFor();
+      await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
       if (await administratorPage.getByText("518", { exact: true }).count()) {
         throw new Error("A Visão geral ainda exibiu o total demonstrativo após carregar o snapshot real.");
       }
+      await administratorPage.getByRole("button", { name: "Filtros" }).click();
+      const filterFieldBoxes = await administratorPage.locator(".filter-panel label").evaluateAll((elements) => elements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+      }));
+      const filterActionsBox = await administratorPage.locator(".filter-panel__actions").boundingBox();
+      if (!filterActionsBox || filterFieldBoxes.length !== 4) {
+        throw new Error("O painel de filtros não apresentou os quatro campos e suas ações.");
+      }
+      for (let index = 0; index < filterFieldBoxes.length; index += 1) {
+        for (let comparedIndex = index + 1; comparedIndex < filterFieldBoxes.length; comparedIndex += 1) {
+          if (rectanglesOverlap(filterFieldBoxes[index], filterFieldBoxes[comparedIndex])) {
+            throw new Error("Os campos do painel de filtros estão sobrepostos.");
+          }
+        }
+        if (rectanglesOverlap(filterFieldBoxes[index], filterActionsBox)) {
+          throw new Error("As ações do painel estão sobrepondo um campo de filtro.");
+        }
+      }
+      await administratorPage.getByLabel("Setor").selectOption("Farmácia");
+      await administratorPage.getByLabel("Prioridade").selectOption("Média");
+      await administratorPage.getByLabel("Status").selectOption("Aguardando informação");
+      await administratorPage.getByRole("button", { name: "Aplicar filtros" }).click();
+      await metricCards.filter({ hasText: "Total de chamados" }).getByText("1", { exact: true }).waitFor();
+      await administratorPage.getByText("Recorte: 1/2", { exact: false }).waitFor();
+      await administratorPage.getByRole("button", { name: "Setor: Farmácia" }).waitFor();
+      await administratorPage.getByRole("button", { name: "Prioridade: Média" }).waitFor();
+      await administratorPage.getByRole("button", { name: "Status: Aguardando informação" }).waitFor();
+      await administratorPage.getByRole("button", { name: "Filtros" }).click();
+      await administratorPage.getByRole("button", { name: "Limpar filtros" }).click();
+      await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
+      await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
     }
 
-    process.stdout.write("QA concluído: auditoria, autorização, saúde, Visão geral real, mapeamentos e sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, saúde, Visão geral real com filtros, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

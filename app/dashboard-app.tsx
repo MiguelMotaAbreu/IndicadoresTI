@@ -123,10 +123,29 @@ type CurrentUser = {
 };
 
 type Filters = {
-  period: string;
+  period: "Toda a base" | "Últimos 90 dias" | "Últimos 30 dias";
   sector: string;
   priority: string;
   status: string;
+};
+
+type FilterOptions = {
+  sectors: string[];
+  priorities: string[];
+  statuses: string[];
+};
+
+const defaultFilters: Filters = {
+  period: "Toda a base",
+  sector: "Todos os setores",
+  priority: "Todas",
+  status: "Todos",
+};
+
+const demoFilterOptions: FilterOptions = {
+  sectors: ["Recepção", "Farmácia", "Consultório 03", "Sala de Medicação"],
+  priorities: ["Crítico", "Muito alta", "Alta", "Média"],
+  statuses: ["Concluído", "Arquivado", "Aguardando Info", "Fornecedor"],
 };
 
 type MetricDefinition = {
@@ -142,8 +161,13 @@ type OverviewLoadState =
   | { status: "ready"; data: OverviewAnalytics; message: string }
   | { status: "empty" | "error"; data: null; message: string };
 
-async function loadOverviewAnalytics(signal?: AbortSignal): Promise<OverviewAnalytics | null> {
-  const response = await fetch("/api/analytics/overview", { cache: "no-store", signal });
+async function loadOverviewAnalytics(filters: Filters, signal?: AbortSignal): Promise<OverviewAnalytics | null> {
+  const searchParams = new URLSearchParams();
+  searchParams.set("period", filters.period === "Últimos 30 dias" ? "last30" : filters.period === "Últimos 90 dias" ? "last90" : "all");
+  if (filters.sector !== defaultFilters.sector) searchParams.set("sector", filters.sector);
+  if (filters.priority !== defaultFilters.priority) searchParams.set("priority", filters.priority);
+  if (filters.status !== defaultFilters.status) searchParams.set("status", filters.status);
+  const response = await fetch(`/api/analytics/overview?${searchParams}`, { cache: "no-store", signal });
   const payload = await response.json().catch(() => null) as { ok?: boolean; data?: OverviewAnalytics | null; error?: string } | null;
   if (!response.ok || !payload?.ok) {
     throw new Error(payload?.error ?? "Não foi possível carregar a Visão geral.");
@@ -485,6 +509,7 @@ function renderDashboardWidgets(
       ];
     }
     const analytics = overviewState.data;
+    const hasMatchingTickets = analytics.selection.matchedTickets > 0;
     const liveDemand = analytics.demand.points.map((point) => ({
       label: formatAnalyticsPeriod(point.period),
       chamados: point.opened,
@@ -504,7 +529,7 @@ function renderDashboardWidgets(
     return [
       <div key="overview-demand">
         <WidgetFrame title="Evolução da demanda" subtitle={`Aberturas e conclusões · por ${analytics.demand.granularity === "day" ? "dia" : "mês"}`} editing={editing} detailsEnabled={false} action={<span className="coverage-badge">Cobertura {formatMetricNumber(analytics.cards.averagePerCalendarDay.coveragePercent)}%</span>}>
-          {liveDemand.length > 0 ? <ResponsiveContainer width="100%" height="100%">
+          {hasMatchingTickets && liveDemand.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={liveDemand} margin={{ top: 10, right: 6, left: -24, bottom: 0 }}>
               {chartGrid}
               <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#8c958f" }} />
@@ -513,7 +538,7 @@ function renderDashboardWidgets(
               <Area isAnimationActive={false} type="monotone" dataKey="chamados" name="Abertos" stroke="#146b49" strokeWidth={2.5} fill="#dcebe4" fillOpacity={0.8} />
               <Area isAnimationActive={false} type="monotone" dataKey="concluidos" name="Concluídos" stroke="#90ad9f" strokeWidth={1.8} fill="#f0f4f1" fillOpacity={0.45} />
             </AreaChart>
-          </ResponsiveContainer> : <AnalyticalEmptyResult message="Nenhuma data de abertura ou conclusão válida foi encontrada." />}
+          </ResponsiveContainer> : <AnalyticalEmptyResult message={hasMatchingTickets ? "Nenhuma data de abertura ou conclusão válida foi encontrada." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="overview-status">
@@ -529,7 +554,7 @@ function renderDashboardWidgets(
             </ResponsiveContainer>
             <div className="donut-center"><strong>{formatMetricNumber(completedPercent)}%</strong><span>concluídos</span></div>
             <div className="legend-list">{liveStatus.map((item) => <button disabled key={item.name}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.value}</b></button>)}</div>
-          </div> : <AnalyticalEmptyResult message="Nenhum status válido foi encontrado no snapshot." />}
+          </div> : <AnalyticalEmptyResult message={hasMatchingTickets ? "Nenhum status válido foi encontrado no recorte." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="overview-reason">
@@ -542,7 +567,7 @@ function renderDashboardWidgets(
               <Tooltip content={<CustomTooltip />} />
               <Bar isAnimationActive={false} dataKey="value" name="Chamados" radius={[0, 5, 5, 0]} fill="#1a7450" maxBarSize={18} />
             </BarChart>
-          </ResponsiveContainer> : <AnalyticalEmptyResult message="Nenhum motivo textual válido foi encontrado no snapshot." />}
+          </ResponsiveContainer> : <AnalyticalEmptyResult message={hasMatchingTickets ? "Nenhum motivo textual válido foi encontrado no recorte." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="overview-priority">
@@ -557,7 +582,7 @@ function renderDashboardWidgets(
                 {livePriority.map((item) => <Cell key={item.name} fill={item.color} />)}
               </Bar>
             </BarChart>
-          </ResponsiveContainer> : <AnalyticalEmptyResult message="Nenhuma prioridade válida foi encontrada no snapshot." />}
+          </ResponsiveContainer> : <AnalyticalEmptyResult message={hasMatchingTickets ? "Nenhuma prioridade válida foi encontrada no recorte." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
     ];
@@ -839,7 +864,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [crossFilter, setCrossFilter] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Filters>({ period: "Toda a base", sector: "Todos os setores", priority: "Todas", status: "Todos" });
+  const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [draftEditor, setDraftEditor] = useState<DashboardDraftEditor>(() => initialDashboardDraft(dashboardKey));
   const [draftPersistenceStatus, setDraftPersistenceStatus] = useState<DraftPersistenceStatus>("loading");
   const [overviewState, setOverviewState] = useState<OverviewLoadState>(() => dashboardKey === "overview"
@@ -934,7 +959,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   useEffect(() => {
     if (dashboardKey !== "overview") return;
     const controller = new AbortController();
-    void loadOverviewAnalytics(controller.signal)
+    void loadOverviewAnalytics(filters, controller.signal)
       .then((data) => setOverviewState(data
         ? { status: "ready", data, message: "Snapshot publicado carregado." }
         : { status: "empty", data: null, message: "Conclua uma sincronização para publicar os primeiros indicadores reais." }))
@@ -947,13 +972,20 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
         });
       });
     return () => controller.abort();
-  }, [dashboardKey]);
+  }, [dashboardKey, filters]);
 
   function setLayout(updater: Layout | ((current: Layout) => Layout)) {
     setDraftEditor((state) => {
       const nextLayout = typeof updater === "function" ? updater(state.current.layout as Layout) : updater;
       return { ...state, current: { ...state.current, layout: toDraftLayout(nextLayout) } };
     });
+  }
+
+  function applyFilters(nextFilters: Filters) {
+    if (dashboardKey === "overview") {
+      setOverviewState({ status: "loading", data: null, message: "Aplicando filtros ao snapshot publicado." });
+    }
+    setFilters(nextFilters);
   }
 
   const scale = useMemo(() => {
@@ -1089,17 +1121,17 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     ? metrics
     : metrics.map((metric) => metric.id === "metric-total" && scale !== 1 ? { ...metric, value: String(Math.round(Number(metric.value) * scale)) } : metric);
   const overviewPeriod = overviewState.status === "ready"
-    && overviewState.data.cards.averagePerCalendarDay.periodStart
-    && overviewState.data.cards.averagePerCalendarDay.periodEnd
-    ? `${formatAnalyticsDate(overviewState.data.cards.averagePerCalendarDay.periodStart)} — ${formatAnalyticsDate(overviewState.data.cards.averagePerCalendarDay.periodEnd)}`
+    && overviewState.data.selection.periodStart
+    && overviewState.data.selection.periodEnd
+    ? `${formatAnalyticsDate(overviewState.data.selection.periodStart)} — ${formatAnalyticsDate(overviewState.data.selection.periodEnd)}`
     : "Período indisponível";
+  const filterOptions = overviewState.status === "ready" ? overviewState.data.selection.options : demoFilterOptions;
+  const overviewFiltersAvailable = dashboardKey !== "overview" || overviewState.status === "ready";
   const dataQualityLabel = dashboardKey !== "overview"
     ? "Base demonstrativa · conexão analítica pendente"
     : overviewState.status === "ready"
-      ? `Base: ${overviewState.data.snapshot.ticketCount} · ${overviewState.data.snapshot.warningCount} alerta(s) · carga ${new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(overviewState.data.snapshot.publishedAt))}`
-      : overviewState.status === "loading"
-        ? "Consultando snapshot publicado..."
-        : overviewState.message;
+      ? `Recorte: ${overviewState.data.selection.matchedTickets}/${overviewState.data.selection.totalTickets} · ${overviewState.data.snapshot.warningCount} alerta(s) · carga ${new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(overviewState.data.snapshot.publishedAt))}`
+      : overviewState.message;
 
   return (
     <div className="page page--dashboard">
@@ -1114,7 +1146,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
             {draftPersistenceStatus === "error" ? <WarningCircleIcon size={15} weight="fill" /> : persistenceBusy ? <ArrowsClockwiseIcon className="spin" size={15} /> : <CloudCheckIcon size={15} weight="fill" />}
             {draftPersistenceStatus === "loading" ? "Carregando painel" : draftPersistenceStatus === "saving" ? "Salvando" : draftPersistenceStatus === "error" ? "Servidor indisponível" : "Painel sincronizado"}
           </span>
-          <button className="button button--ghost" disabled={dashboardKey === "overview"} title={dashboardKey === "overview" ? "A exportação será habilitada quando os filtros reais estiverem conectados." : undefined} onClick={() => flash("Exportação preparada com os filtros atuais")}><DownloadSimpleIcon size={17} /> Exportar</button>
+          <button className="button button--ghost" disabled={dashboardKey === "overview"} title={dashboardKey === "overview" ? "A exportação será habilitada quando o gerador real de arquivos estiver conectado." : undefined} onClick={() => flash("Exportação preparada com os filtros atuais")}><DownloadSimpleIcon size={17} /> Exportar</button>
           {editing ? (
             <>
               <button className="button button--ghost" disabled={persistenceBusy} onClick={restoreInitialLayout}>Restaurar</button>
@@ -1128,16 +1160,18 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
       </div>
 
       <section className="filter-bar">
-        <button className="filter-bar__main" disabled={dashboardKey === "overview"} title={dashboardKey === "overview" ? "Os filtros serão conectados ao modelo analítico na próxima etapa." : undefined} onClick={() => setFiltersOpen((value) => !value)}><FunnelSimpleIcon size={17} /><strong>Filtros</strong><span>{filters.period}</span><CaretDownIcon size={14} /></button>
+        <button className="filter-bar__main" disabled={!overviewFiltersAvailable} title={!overviewFiltersAvailable ? "Aguarde o carregamento do snapshot para filtrar." : undefined} onClick={() => setFiltersOpen((value) => !value)}><FunnelSimpleIcon size={17} /><strong>Filtros</strong><span>{filters.period}</span><CaretDownIcon size={14} /></button>
         <span className="filter-separator" />
         <button className="filter-pill" disabled={dashboardKey === "overview"}><CalendarBlankIcon size={15} /> {dashboardKey === "overview" ? overviewPeriod : "07 jul — 20 out"}</button>
-        {filters.sector !== "Todos os setores" && <button className="filter-chip" onClick={() => setFilters((current) => ({ ...current, sector: "Todos os setores" }))}>{filters.sector}<XIcon size={12} /></button>}
+        {filters.sector !== defaultFilters.sector && <button className="filter-chip" onClick={() => applyFilters({ ...filters, sector: defaultFilters.sector })}>Setor: {filters.sector}<XIcon size={12} /></button>}
+        {filters.priority !== defaultFilters.priority && <button className="filter-chip" onClick={() => applyFilters({ ...filters, priority: defaultFilters.priority })}>Prioridade: {filters.priority}<XIcon size={12} /></button>}
+        {filters.status !== defaultFilters.status && <button className="filter-chip" onClick={() => applyFilters({ ...filters, status: defaultFilters.status })}>Status: {filters.status}<XIcon size={12} /></button>}
         {crossFilter && <button className="filter-chip filter-chip--active" onClick={() => setCrossFilter(null)}>Categoria: {crossFilter}<XIcon size={12} /></button>}
         <span className="filter-bar__spacer" />
         <span className="data-quality"><InfoIcon size={15} /> {dataQualityLabel}</span>
       </section>
 
-      {filtersOpen && dashboardKey !== "overview" && <FilterPanel filters={filters} onChange={setFilters} onClose={() => setFiltersOpen(false)} />}
+      {filtersOpen && <FilterPanel filters={filters} options={filterOptions} onChange={applyFilters} onClose={() => setFiltersOpen(false)} />}
 
       {editing && (
         <div className="edit-notice"><PencilSimpleIcon size={16} /><span><strong>{hasUnsavedChanges ? "Alterações ainda não salvas." : "Modo de edição ativo."}</strong> Arraste e redimensione livremente; somente “Salvar layout” torna as mudanças permanentes.</span><button onClick={cancelEditing}>Cancelar</button></div>
@@ -1220,16 +1254,23 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   );
 }
 
-function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChange: (filters: Filters) => void; onClose: () => void }) {
+function FilterPanel({ filters, options, onChange, onClose }: { filters: Filters; options: FilterOptions; onChange: (filters: Filters) => void; onClose: () => void }) {
   const [draft, setDraft] = useState(filters);
+  const draftIsDefault = draft.period === defaultFilters.period
+    && draft.sector === defaultFilters.sector
+    && draft.priority === defaultFilters.priority
+    && draft.status === defaultFilters.status;
   return (
     <section className="filter-panel">
       <div className="filter-panel__heading"><span><SlidersHorizontalIcon size={18} /><strong>Refinar análise</strong></span><button onClick={onClose}><XIcon size={16} /></button></div>
-      <label>Período<select value={draft.period} onChange={(event) => setDraft({ ...draft, period: event.target.value })}><option>Toda a base</option><option>Últimos 90 dias</option><option>Últimos 30 dias</option></select></label>
-      <label>Setor<select value={draft.sector} onChange={(event) => setDraft({ ...draft, sector: event.target.value })}><option>Todos os setores</option><option>Recepção</option><option>Farmácia</option><option>Consultório 03</option><option>Sala de Medicação</option></select></label>
-      <label>Prioridade<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value })}><option>Todas</option><option>Crítico</option><option>Muito alta</option><option>Alta</option><option>Média</option></select></label>
-      <label>Status<select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}><option>Todos</option><option>Concluído</option><option>Arquivado</option><option>Aguardando Info</option><option>Fornecedor</option></select></label>
-      <button className="button button--primary" onClick={() => { onChange(draft); onClose(); }}>Aplicar filtros</button>
+      <label>Período de abertura<select value={draft.period} onChange={(event) => setDraft({ ...draft, period: event.target.value as Filters["period"] })}><option>Toda a base</option><option>Últimos 90 dias</option><option>Últimos 30 dias</option></select></label>
+      <label>Setor<select value={draft.sector} onChange={(event) => setDraft({ ...draft, sector: event.target.value })}><option>{defaultFilters.sector}</option>{options.sectors.map((option) => <option key={option}>{option}</option>)}</select></label>
+      <label>Prioridade<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value })}><option>{defaultFilters.priority}</option>{options.priorities.map((option) => <option key={option}>{option}</option>)}</select></label>
+      <label>Status<select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}><option>{defaultFilters.status}</option>{options.statuses.map((option) => <option key={option}>{option}</option>)}</select></label>
+      <div className="filter-panel__actions">
+        <button className="button button--ghost" disabled={draftIsDefault} onClick={() => { onChange(defaultFilters); onClose(); }}>Limpar filtros</button>
+        <button className="button button--primary" onClick={() => { onChange(draft); onClose(); }}>Aplicar filtros</button>
+      </div>
     </section>
   );
 }

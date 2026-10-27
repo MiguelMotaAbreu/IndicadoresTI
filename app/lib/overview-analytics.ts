@@ -4,6 +4,15 @@ import type { NormalizedNotionRecord } from "./notion-record-transformer.ts";
 
 export type AnalyticsDistributionItem = { name: string; value: number };
 
+export type OverviewPeriod = "all" | "last90" | "last30";
+
+export type OverviewAnalyticsFilters = {
+  period: OverviewPeriod;
+  sector: string | null;
+  priority: string | null;
+  status: string | null;
+};
+
 export type OverviewAnalytics = {
   snapshot: {
     id: string;
@@ -11,6 +20,18 @@ export type OverviewAnalytics = {
     warningCount: number;
     ticketCount: number;
     eventCount: number;
+  };
+  selection: {
+    totalTickets: number;
+    matchedTickets: number;
+    periodStart: string | null;
+    periodEnd: string | null;
+    filters: OverviewAnalyticsFilters;
+    options: {
+      sectors: string[];
+      priorities: string[];
+      statuses: string[];
+    };
   };
   cards: {
     totalTickets: number;
@@ -96,11 +117,73 @@ function calendarDaysInclusive(first: string, last: string): number {
   return Math.floor((utcDay(last) - utcDay(first)) / 86_400_000) + 1;
 }
 
+function addCalendarDays(key: string, days: number): string {
+  return new Date(utcDay(key) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
 function categoryValues(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKey): string[] {
   const value = validField(record, fieldKey);
   if (value?.kind === "text") return [value.value];
   if (value?.kind === "text_list") return [...new Set(value.value)];
   return [];
+}
+
+function priorityRank(value: string): number {
+  const priority = new Map([
+    ["critico", 0],
+    ["muito alta", 1],
+    ["alta", 2],
+    ["media", 3],
+    ["baixa", 4],
+    ["planejado", 5],
+    ["nao definido", 6],
+  ]);
+  return priority.get(normalizeLabel(value)) ?? Number.MAX_SAFE_INTEGER;
+}
+
+function filterOptions(
+  records: readonly NormalizedNotionRecord[],
+  fieldKey: NotionMappingFieldKey,
+  priorityOrder = false,
+): string[] {
+  const unique = new Map<string, string>();
+  for (const record of records) {
+    for (const rawValue of categoryValues(record, fieldKey)) {
+      const value = rawValue.trim();
+      const normalized = normalizeLabel(value);
+      if (normalized && !unique.has(normalized)) unique.set(normalized, value);
+    }
+  }
+  return [...unique.values()].sort((left, right) => {
+    if (priorityOrder) {
+      const rankDifference = priorityRank(left) - priorityRank(right);
+      if (rankDifference !== 0) return rankDifference;
+    }
+    return left.localeCompare(right, "pt-BR");
+  });
+}
+
+function matchesCategory(
+  record: NormalizedNotionRecord,
+  fieldKey: NotionMappingFieldKey,
+  selected: string | null,
+): boolean {
+  if (!selected) return true;
+  const normalizedSelected = normalizeLabel(selected);
+  return categoryValues(record, fieldKey).some((value) => normalizeLabel(value) === normalizedSelected);
+}
+
+function normalizeFilters(filters: Partial<OverviewAnalyticsFilters>): OverviewAnalyticsFilters {
+  const normalizedDimension = (value: string | null | undefined) => {
+    const trimmed = value?.trim() ?? "";
+    return trimmed || null;
+  };
+  return {
+    period: filters.period === "last30" || filters.period === "last90" ? filters.period : "all",
+    sector: normalizedDimension(filters.sector),
+    priority: normalizedDimension(filters.priority),
+    status: normalizedDimension(filters.status),
+  };
 }
 
 function distribution(
@@ -117,20 +200,11 @@ function distribution(
     for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
   }
 
-  const priority = new Map([
-    ["critico", 0],
-    ["muito alta", 1],
-    ["alta", 2],
-    ["media", 3],
-    ["baixa", 4],
-    ["planejado", 5],
-    ["nao definido", 6],
-  ]);
   let items = Array.from(counts, ([name, value]) => ({ name, value }));
   items.sort((left, right) => {
     if (options.priorityOrder) {
-      const leftPriority = priority.get(normalizeLabel(left.name)) ?? Number.MAX_SAFE_INTEGER;
-      const rightPriority = priority.get(normalizeLabel(right.name)) ?? Number.MAX_SAFE_INTEGER;
+      const leftPriority = priorityRank(left.name);
+      const rightPriority = priorityRank(right.name);
       if (leftPriority !== rightPriority) return leftPriority - rightPriority;
     }
     return right.value - left.value || left.name.localeCompare(right.name, "pt-BR");
@@ -189,20 +263,28 @@ function classifyPending(records: readonly NormalizedNotionRecord[]) {
   return { value, validStatuses, coveragePercent: percentage(validStatuses, records.length) };
 }
 
-function demandSeries(records: readonly NormalizedNotionRecord[]) {
+function demandSeries(
+  records: readonly NormalizedNotionRecord[],
+  periodStart: string | null,
+  periodEnd: string | null,
+) {
   const openedDates = records.flatMap((record) => {
     const value = readDate(record, "ticket.openedAt");
-    return value ? [dateKey(value)] : [];
+    if (!value) return [];
+    const key = dateKey(value);
+    return periodStart && periodEnd && (key < periodStart || key > periodEnd) ? [] : [key];
   });
   const completedDates = records.flatMap((record) => {
     const value = readDate(record, "ticket.completedAt");
-    return value ? [dateKey(value)] : [];
+    if (!value) return [];
+    const key = dateKey(value);
+    return periodStart && periodEnd && (key < periodStart || key > periodEnd) ? [] : [key];
   });
   const allDates = [...openedDates, ...completedDates].sort();
-  if (allDates.length === 0) return { granularity: "day" as const, points: [] };
+  const first = periodStart ?? allDates[0];
+  const last = periodEnd ?? allDates.at(-1);
+  if (!first || !last) return { granularity: "day" as const, points: [] };
 
-  const first = allDates[0];
-  const last = allDates.at(-1)!;
   const daySpan = calendarDaysInclusive(first, last);
   const granularity = daySpan <= 366 ? "day" as const : "month" as const;
   const toBucket = (value: string) => granularity === "day" ? value : value.slice(0, 7);
@@ -246,15 +328,37 @@ function demandSeries(records: readonly NormalizedNotionRecord[]) {
 export function calculateOverviewAnalytics(
   snapshot: AnalyticalSnapshot,
   dataset: Pick<SnapshotDataset, "tickets" | "history">,
+  requestedFilters: Partial<OverviewAnalyticsFilters> = {},
 ): OverviewAnalytics {
-  const tickets = dataset.tickets;
-  const openedKeys = tickets.flatMap((record) => {
+  const filters = normalizeFilters(requestedFilters);
+  const allTickets = dataset.tickets;
+  const allOpenedKeys = allTickets.flatMap((record) => {
     const value = readDate(record, "ticket.openedAt");
     return value ? [dateKey(value)] : [];
   }).sort();
-  const firstOpening = openedKeys[0] ?? null;
-  const lastOpening = openedKeys.at(-1) ?? null;
-  const calendarDays = firstOpening && lastOpening ? calendarDaysInclusive(firstOpening, lastOpening) : 0;
+  const lastOpening = allOpenedKeys.at(-1) ?? null;
+  const periodStart = filters.period === "all"
+    ? allOpenedKeys[0] ?? null
+    : lastOpening
+      ? addCalendarDays(lastOpening, filters.period === "last30" ? -29 : -89)
+      : null;
+  const periodEnd = lastOpening;
+  const tickets = allTickets.filter((record) => {
+    if (filters.period !== "all") {
+      const openedAt = readDate(record, "ticket.openedAt");
+      if (!openedAt || !periodStart || !periodEnd) return false;
+      const openedKey = dateKey(openedAt);
+      if (openedKey < periodStart || openedKey > periodEnd) return false;
+    }
+    return matchesCategory(record, "ticket.sector", filters.sector)
+      && matchesCategory(record, "ticket.priority", filters.priority)
+      && matchesCategory(record, "ticket.status", filters.status);
+  });
+  const openedKeys = tickets.flatMap((record) => {
+    const value = readDate(record, "ticket.openedAt");
+    return value ? [dateKey(value)] : [];
+  });
+  const calendarDays = periodStart && periodEnd ? calendarDaysInclusive(periodStart, periodEnd) : 0;
 
   return {
     snapshot: {
@@ -264,6 +368,18 @@ export function calculateOverviewAnalytics(
       ticketCount: snapshot.ticketCount,
       eventCount: snapshot.eventCount,
     },
+    selection: {
+      totalTickets: allTickets.length,
+      matchedTickets: tickets.length,
+      periodStart,
+      periodEnd,
+      filters,
+      options: {
+        sectors: filterOptions(allTickets, "ticket.sector"),
+        priorities: filterOptions(allTickets, "ticket.priority", true),
+        statuses: filterOptions(allTickets, "ticket.status"),
+      },
+    },
     cards: {
       totalTickets: tickets.length,
       averagePerCalendarDay: {
@@ -271,13 +387,13 @@ export function calculateOverviewAnalytics(
         validOpenings: openedKeys.length,
         calendarDays,
         coveragePercent: percentage(openedKeys.length, tickets.length),
-        periodStart: firstOpening,
-        periodEnd: lastOpening,
+        periodStart,
+        periodEnd,
       },
       slaCompliance: classifySla(tickets),
       pendingTickets: classifyPending(tickets),
     },
-    demand: demandSeries(tickets),
+    demand: demandSeries(tickets, periodStart, periodEnd),
     distributions: {
       status: distribution(tickets, "ticket.status"),
       priority: distribution(tickets, "ticket.priority", { priorityOrder: true }),

@@ -29,6 +29,7 @@ test("calcula a visão geral com dias corridos, cobertura e classificações reg
         "ticket.completedAt": valid("date", "2026-10-02T11:00:00-03:00"),
         "ticket.status": valid("text", "Concluído"),
         "ticket.priority": valid("text", "Alta"),
+        "ticket.sector": valid("text", "Recepção"),
         "ticket.reason": valid("text", "Impressora"),
         "ticket.slaStatus": valid("text", "Dentro do prazo"),
       }),
@@ -36,6 +37,7 @@ test("calcula a visão geral com dias corridos, cobertura e classificações reg
         "ticket.openedAt": valid("date", "2026-10-03T08:00:00-03:00"),
         "ticket.status": valid("text", "Aguardando informação"),
         "ticket.priority": valid("text", "Crítico"),
+        "ticket.sector": valid("text", "Farmácia"),
         "ticket.reason": valid("text", "Computador"),
         "ticket.slaStatus": valid("text", "Fora do prazo"),
       }),
@@ -43,6 +45,7 @@ test("calcula a visão geral com dias corridos, cobertura e classificações reg
         "ticket.openedAt": valid("date", "2026-10-03T15:00:00-03:00"),
         "ticket.status": valid("text", "Com fornecedor"),
         "ticket.priority": valid("text", "Média"),
+        "ticket.sector": valid("text", "Farmácia"),
         "ticket.reason": valid("text", "Impressora"),
         "ticket.slaStatus": valid("text", "Não avaliado"),
       }),
@@ -58,6 +61,18 @@ test("calcula a visão geral com dias corridos, cobertura e classificações reg
   });
 
   assert.equal(analytics.cards.totalTickets, 4);
+  assert.deepEqual(analytics.selection, {
+    totalTickets: 4,
+    matchedTickets: 4,
+    periodStart: "2026-10-01",
+    periodEnd: "2026-10-03",
+    filters: { period: "all", sector: null, priority: null, status: null },
+    options: {
+      sectors: ["Farmácia", "Recepção"],
+      priorities: ["Crítico", "Alta", "Média"],
+      statuses: ["Aguardando informação", "Com fornecedor", "Concluído"],
+    },
+  });
   assert.deepEqual(analytics.cards.averagePerCalendarDay, {
     value: 1,
     validOpenings: 3,
@@ -159,4 +174,74 @@ test("agrega séries longas por mês e limita o número de pontos", () => {
   assert.equal(analytics.demand.points[0].period, "2024-01");
   assert.equal(analytics.demand.points.at(-1).period, "2026-10");
   assert.ok(analytics.demand.points.length <= 600);
+});
+
+test("aplica período de abertura e dimensões sobre o mesmo recorte real", () => {
+  const analytics = calculateOverviewAnalytics(
+    { ...snapshot, ticketCount: 4 },
+    {
+      tickets: [
+        ticket("ticket-old", {
+          "ticket.openedAt": valid("date", "2026-09-30T10:00:00-03:00"),
+          "ticket.sector": valid("text", "Farmácia"),
+          "ticket.priority": valid("text", "Alta"),
+          "ticket.status": valid("text", "Aguardando informação"),
+        }),
+        ticket("ticket-filtered", {
+          "ticket.openedAt": valid("date", "2026-10-01T10:00:00-03:00"),
+          "ticket.completedAt": valid("date", "2026-10-30T12:00:00-03:00"),
+          "ticket.sector": valid("text", "Farmácia"),
+          "ticket.priority": valid("text", "Alta"),
+          "ticket.status": valid("text", "Aguardando informação"),
+          "ticket.slaStatus": valid("text", "Dentro do prazo"),
+        }),
+        ticket("ticket-other-status", {
+          "ticket.openedAt": valid("date", "2026-10-15T10:00:00-03:00"),
+          "ticket.sector": valid("text", "Farmácia"),
+          "ticket.priority": valid("text", "Alta"),
+          "ticket.status": valid("text", "Concluído"),
+        }),
+        ticket("ticket-anchor", {
+          "ticket.openedAt": valid("date", "2026-10-30T10:00:00-03:00"),
+          "ticket.sector": valid("text", "Recepção"),
+          "ticket.priority": valid("text", "Média"),
+          "ticket.status": valid("text", "Concluído"),
+        }),
+      ],
+      history: [],
+    },
+    { period: "last30", sector: "farmacia", priority: "alta", status: "aguardando informação" },
+  );
+
+  assert.equal(analytics.selection.periodStart, "2026-10-01");
+  assert.equal(analytics.selection.periodEnd, "2026-10-30");
+  assert.equal(analytics.selection.matchedTickets, 1);
+  assert.equal(analytics.cards.totalTickets, 1);
+  assert.equal(analytics.cards.averagePerCalendarDay.value, 0.03);
+  assert.equal(analytics.cards.averagePerCalendarDay.calendarDays, 30);
+  assert.equal(analytics.cards.slaCompliance.valuePercent, 100);
+  assert.equal(analytics.demand.points.length, 30);
+  assert.deepEqual(analytics.demand.points[0], { period: "2026-10-01", opened: 1, completed: 0 });
+  assert.deepEqual(analytics.demand.points.at(-1), { period: "2026-10-30", opened: 0, completed: 1 });
+  assert.deepEqual(analytics.selection.options.sectors, ["Farmácia", "Recepção"]);
+});
+
+test("mantém o intervalo da base quando uma combinação de filtros não encontra chamados", () => {
+  const analytics = calculateOverviewAnalytics(
+    { ...snapshot, ticketCount: 1 },
+    {
+      tickets: [ticket("ticket-one", {
+        "ticket.openedAt": valid("date", "2026-10-20T10:00:00-03:00"),
+        "ticket.sector": valid("text", "Recepção"),
+      })],
+      history: [],
+    },
+    { sector: "Farmácia" },
+  );
+
+  assert.equal(analytics.selection.matchedTickets, 0);
+  assert.equal(analytics.cards.totalTickets, 0);
+  assert.equal(analytics.cards.averagePerCalendarDay.value, 0);
+  assert.equal(analytics.cards.averagePerCalendarDay.calendarDays, 1);
+  assert.deepEqual(analytics.selection.options.sectors, ["Recepção"]);
 });

@@ -171,12 +171,15 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .filter-chip--active { border-color: #9dc3ae; background: var(--green-50); color: var(--green-800); }
 .filter-bar__spacer { flex: 1; }
 .data-quality { display: flex; align-items: center; gap: 5px; color: var(--ink-faint); font-size: 8.5px; padding-right: 5px; }
-.filter-panel { position: absolute; z-index: 60; width: 720px; display: grid; grid-template-columns: repeat(4, minmax(0,1fr)) auto; align-items: end; gap: 10px; margin-top: 7px; border: 1px solid var(--line); border-radius: 14px; background: white; box-shadow: var(--shadow-md); padding: 14px; }
+.filter-panel { position: absolute; z-index: 60; width: min(720px, calc(100% - 40px)); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: 10px; margin-top: 7px; border: 1px solid var(--line); border-radius: 14px; background: white; box-shadow: var(--shadow-md); padding: 14px; }
 .filter-panel__heading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 0 0 10px; }
 .filter-panel__heading span { display: flex; align-items: center; gap: 7px; font-size: 11px; }
 .filter-panel__heading button { border: 0; background: transparent; cursor: pointer; }
-.filter-panel label { display: grid; gap: 6px; color: var(--ink-faint); font-size: 9px; font-weight: 650; }
+.filter-panel label { min-width: 0; display: grid; gap: 6px; color: var(--ink-faint); font-size: 9px; font-weight: 650; }
+.filter-panel select { width: 100%; min-width: 0; }
 .filter-panel select, .builder-column select { height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); color: var(--ink); padding: 0 8px; font-size: 10px; }
+.filter-panel__actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding-top: 2px; }
+.filter-panel__actions .button { white-space: nowrap; }
 .edit-notice { min-height: 39px; display: flex; align-items: center; gap: 8px; margin-top: 10px; border: 1px solid #b6d2c2; border-radius: 11px; background: var(--green-50); color: var(--green-800); padding: 7px 10px; font-size: 9px; }
 .edit-notice span { flex: 1; }
 .edit-notice button { border: 0; background: transparent; color: var(--green-800); cursor: pointer; font-weight: 700; }
