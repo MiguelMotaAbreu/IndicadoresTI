@@ -135,6 +135,17 @@ type FilterOptions = {
   statuses: string[];
 };
 
+type OverviewCrossFilter = {
+  field: "status" | "priority" | "reason";
+  value: string;
+};
+
+const overviewCrossFilterLabels: Record<OverviewCrossFilter["field"], string> = {
+  status: "Status",
+  priority: "Prioridade",
+  reason: "Motivo",
+};
+
 const defaultFilters: Filters = {
   period: "Toda a base",
   sector: "Todos os setores",
@@ -161,12 +172,15 @@ type OverviewLoadState =
   | { status: "ready"; data: OverviewAnalytics; message: string }
   | { status: "empty" | "error"; data: null; message: string };
 
-async function loadOverviewAnalytics(filters: Filters, signal?: AbortSignal): Promise<OverviewAnalytics | null> {
+async function loadOverviewAnalytics(filters: Filters, crossFilter: OverviewCrossFilter | null, signal?: AbortSignal): Promise<OverviewAnalytics | null> {
   const searchParams = new URLSearchParams();
   searchParams.set("period", filters.period === "Últimos 30 dias" ? "last30" : filters.period === "Últimos 90 dias" ? "last90" : "all");
   if (filters.sector !== defaultFilters.sector) searchParams.set("sector", filters.sector);
-  if (filters.priority !== defaultFilters.priority) searchParams.set("priority", filters.priority);
-  if (filters.status !== defaultFilters.status) searchParams.set("status", filters.status);
+  if (crossFilter?.field === "priority") searchParams.set("priority", crossFilter.value);
+  else if (filters.priority !== defaultFilters.priority) searchParams.set("priority", filters.priority);
+  if (crossFilter?.field === "status") searchParams.set("status", crossFilter.value);
+  else if (filters.status !== defaultFilters.status) searchParams.set("status", filters.status);
+  if (crossFilter?.field === "reason") searchParams.set("reason", crossFilter.value);
   const response = await fetch(`/api/analytics/overview?${searchParams}`, { cache: "no-store", signal });
   const payload = await response.json().catch(() => null) as { ok?: boolean; data?: OverviewAnalytics | null; error?: string } | null;
   if (!response.ok || !payload?.ok) {
@@ -489,6 +503,7 @@ function renderDashboardWidgets(
   editing: boolean,
   scaledDemand: typeof demandSeries,
   setCrossFilter: (value: string) => void,
+  onOverviewCrossFilter: (field: OverviewCrossFilter["field"], value: string) => void,
   overviewState: OverviewLoadState,
 ) {
   const chartGrid = <CartesianGrid stroke="#edf0ed" vertical={false} />;
@@ -542,43 +557,43 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="overview-status">
-        <WidgetFrame title="Distribuição por status" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.status.coveragePercent)}%`} editing={editing} detailsEnabled={false}>
+        <WidgetFrame title="Distribuição por status" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.status.coveragePercent)}% · clique para cruzar`} editing={editing} detailsEnabled={false}>
           {liveStatus.length > 0 ? <div className="donut-wrap">
             <ResponsiveContainer width="100%" height="55%">
               <PieChart>
-                <Pie isAnimationActive={false} data={liveStatus} dataKey="value" nameKey="name" innerRadius="64%" outerRadius="88%" paddingAngle={2} stroke="none">
+                <Pie isAnimationActive={false} data={liveStatus} dataKey="value" nameKey="name" innerRadius="64%" outerRadius="88%" paddingAngle={2} stroke="none" cursor="pointer" onClick={(data) => onOverviewCrossFilter("status", data.name ?? "Sem classificação")}>
                   {liveStatus.map((item) => <Cell key={item.name} fill={item.color} />)}
                 </Pie>
                 <Tooltip content={<CustomTooltip />} />
               </PieChart>
             </ResponsiveContainer>
             <div className="donut-center"><strong>{formatMetricNumber(completedPercent)}%</strong><span>concluídos</span></div>
-            <div className="legend-list">{liveStatus.map((item) => <button disabled key={item.name}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.value}</b></button>)}</div>
+            <div className="legend-list">{liveStatus.map((item) => <button key={item.name} onClick={() => onOverviewCrossFilter("status", item.name)}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.value}</b></button>)}</div>
           </div> : <AnalyticalEmptyResult message={hasMatchingTickets ? "Nenhum status válido foi encontrado no recorte." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="overview-reason">
-        <WidgetFrame title="Chamados por motivo" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.reason.coveragePercent)}% · categorias derivadas ainda não aplicadas`} editing={editing} detailsEnabled={false}>
+        <WidgetFrame title="Chamados por motivo" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.reason.coveragePercent)}% · clique para cruzar`} editing={editing} detailsEnabled={false}>
           {liveReasons.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={liveReasons} layout="vertical" margin={{ top: 4, right: 22, left: 2, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ed" horizontal={false} />
               <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#8c958f" }} />
               <YAxis type="category" dataKey="name" width={82} tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#606963" }} />
               <Tooltip content={<CustomTooltip />} />
-              <Bar isAnimationActive={false} dataKey="value" name="Chamados" radius={[0, 5, 5, 0]} fill="#1a7450" maxBarSize={18} />
+              <Bar isAnimationActive={false} dataKey="value" name="Chamados" radius={[0, 5, 5, 0]} fill="#1a7450" maxBarSize={18} cursor="pointer" onClick={(data) => onOverviewCrossFilter("reason", data.name ?? "Sem classificação")} />
             </BarChart>
           </ResponsiveContainer> : <AnalyticalEmptyResult message={hasMatchingTickets ? "Nenhum motivo textual válido foi encontrado no recorte." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="overview-priority">
-        <WidgetFrame title="Distribuição por prioridade" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.priority.coveragePercent)}%`} editing={editing} detailsEnabled={false} action={<span className="sample-badge">N = {analytics.cards.totalTickets}</span>}>
+        <WidgetFrame title="Distribuição por prioridade" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.priority.coveragePercent)}% · clique para cruzar`} editing={editing} detailsEnabled={false} action={<span className="sample-badge">N = {analytics.cards.totalTickets}</span>}>
           {livePriority.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={livePriority} margin={{ top: 8, right: 26, left: -24, bottom: 0 }}>
               {chartGrid}
               <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#747d77" }} interval={0} />
               <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#8c958f" }} />
               <Tooltip content={<CustomTooltip />} />
-              <Bar isAnimationActive={false} dataKey="value" name="Chamados" radius={[5, 5, 0, 0]} maxBarSize={34}>
+              <Bar isAnimationActive={false} dataKey="value" name="Chamados" radius={[5, 5, 0, 0]} maxBarSize={34} cursor="pointer" onClick={(data) => onOverviewCrossFilter("priority", data.name ?? "Sem classificação")}>
                 {livePriority.map((item) => <Cell key={item.name} fill={item.color} />)}
               </Bar>
             </BarChart>
@@ -863,6 +878,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   const [builderWidgetId, setBuilderWidgetId] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [crossFilter, setCrossFilter] = useState<string | null>(null);
+  const [overviewCrossFilter, setOverviewCrossFilter] = useState<OverviewCrossFilter | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [draftEditor, setDraftEditor] = useState<DashboardDraftEditor>(() => initialDashboardDraft(dashboardKey));
@@ -959,7 +975,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   useEffect(() => {
     if (dashboardKey !== "overview") return;
     const controller = new AbortController();
-    void loadOverviewAnalytics(filters, controller.signal)
+    void loadOverviewAnalytics(filters, overviewCrossFilter, controller.signal)
       .then((data) => setOverviewState(data
         ? { status: "ready", data, message: "Snapshot publicado carregado." }
         : { status: "empty", data: null, message: "Conclua uma sincronização para publicar os primeiros indicadores reais." }))
@@ -972,7 +988,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
         });
       });
     return () => controller.abort();
-  }, [dashboardKey, filters]);
+  }, [dashboardKey, filters, overviewCrossFilter]);
 
   function setLayout(updater: Layout | ((current: Layout) => Layout)) {
     setDraftEditor((state) => {
@@ -981,11 +997,29 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     });
   }
 
-  function applyFilters(nextFilters: Filters) {
+  function markOverviewReloading(message: string) {
     if (dashboardKey === "overview") {
-      setOverviewState({ status: "loading", data: null, message: "Aplicando filtros ao snapshot publicado." });
+      setOverviewState({ status: "loading", data: null, message });
     }
+  }
+
+  function updateFilters(nextFilters: Filters) {
+    markOverviewReloading("Aplicando filtros ao snapshot publicado.");
     setFilters(nextFilters);
+  }
+
+  function applyFilters(nextFilters: Filters) {
+    markOverviewReloading("Aplicando filtros ao snapshot publicado.");
+    setOverviewCrossFilter(null);
+    setFilters(nextFilters);
+  }
+
+  function applyOverviewCrossFilter(field: OverviewCrossFilter["field"], value: string) {
+    const nextCrossFilter = overviewCrossFilter?.field === field && overviewCrossFilter.value === value
+      ? null
+      : { field, value };
+    markOverviewReloading(nextCrossFilter ? "Aplicando seleção cruzada ao snapshot." : "Removendo seleção cruzada.");
+    setOverviewCrossFilter(nextCrossFilter);
   }
 
   const scale = useMemo(() => {
@@ -1163,10 +1197,11 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
         <button className="filter-bar__main" disabled={!overviewFiltersAvailable} title={!overviewFiltersAvailable ? "Aguarde o carregamento do snapshot para filtrar." : undefined} onClick={() => setFiltersOpen((value) => !value)}><FunnelSimpleIcon size={17} /><strong>Filtros</strong><span>{filters.period}</span><CaretDownIcon size={14} /></button>
         <span className="filter-separator" />
         <button className="filter-pill" disabled={dashboardKey === "overview"}><CalendarBlankIcon size={15} /> {dashboardKey === "overview" ? overviewPeriod : "07 jul — 20 out"}</button>
-        {filters.sector !== defaultFilters.sector && <button className="filter-chip" onClick={() => applyFilters({ ...filters, sector: defaultFilters.sector })}>Setor: {filters.sector}<XIcon size={12} /></button>}
-        {filters.priority !== defaultFilters.priority && <button className="filter-chip" onClick={() => applyFilters({ ...filters, priority: defaultFilters.priority })}>Prioridade: {filters.priority}<XIcon size={12} /></button>}
-        {filters.status !== defaultFilters.status && <button className="filter-chip" onClick={() => applyFilters({ ...filters, status: defaultFilters.status })}>Status: {filters.status}<XIcon size={12} /></button>}
-        {crossFilter && <button className="filter-chip filter-chip--active" onClick={() => setCrossFilter(null)}>Categoria: {crossFilter}<XIcon size={12} /></button>}
+        {filters.sector !== defaultFilters.sector && <button className="filter-chip" onClick={() => updateFilters({ ...filters, sector: defaultFilters.sector })}>Setor: {filters.sector}<XIcon size={12} /></button>}
+        {filters.priority !== defaultFilters.priority && overviewCrossFilter?.field !== "priority" && <button className="filter-chip" onClick={() => updateFilters({ ...filters, priority: defaultFilters.priority })}>Prioridade: {filters.priority}<XIcon size={12} /></button>}
+        {filters.status !== defaultFilters.status && overviewCrossFilter?.field !== "status" && <button className="filter-chip" onClick={() => updateFilters({ ...filters, status: defaultFilters.status })}>Status: {filters.status}<XIcon size={12} /></button>}
+        {dashboardKey === "overview" && overviewCrossFilter && <button className="filter-chip filter-chip--active" onClick={() => applyOverviewCrossFilter(overviewCrossFilter.field, overviewCrossFilter.value)}>{overviewCrossFilterLabels[overviewCrossFilter.field]} cruzado: {overviewCrossFilter.value}<XIcon size={12} /></button>}
+        {dashboardKey !== "overview" && crossFilter && <button className="filter-chip filter-chip--active" onClick={() => setCrossFilter(null)}>Categoria: {crossFilter}<XIcon size={12} /></button>}
         <span className="filter-bar__spacer" />
         <span className="data-quality"><InfoIcon size={15} /> {dataQualityLabel}</span>
       </section>
@@ -1195,7 +1230,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
               </div>
             ))}
 
-            {renderDashboardWidgets(dashboardKey, editing, scaledDemand, setCrossFilter, overviewState)}
+            {renderDashboardWidgets(dashboardKey, editing, scaledDemand, setCrossFilter, applyOverviewCrossFilter, overviewState)}
 
             {customWidgets.map((widget) => (
               <div key={widget.id}>

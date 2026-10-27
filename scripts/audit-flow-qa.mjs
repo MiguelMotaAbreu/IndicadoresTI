@@ -497,7 +497,7 @@ async function runAuditFlow(baseUrl) {
       ) {
         throw new Error("A visão geral não calculou corretamente o snapshot descartável publicado.");
       }
-      const filteredOverviewResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview?period=all&sector=${encodeURIComponent("Farmácia")}&priority=${encodeURIComponent("Média")}&status=${encodeURIComponent("Aguardando informação")}`);
+      const filteredOverviewResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview?period=all&sector=${encodeURIComponent("Farmácia")}&priority=${encodeURIComponent("Média")}&status=${encodeURIComponent("Aguardando informação")}&reason=${encodeURIComponent("Computador")}`);
       if (!filteredOverviewResponse.ok()) throw new Error("A visão geral rejeitou filtros analíticos válidos.");
       const filteredOverview = await filteredOverviewResponse.json();
       if (
@@ -584,9 +584,16 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByRole("button", { name: "Limpar filtros" }).click();
       await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
+      await administratorPage.locator(".legend-list button").filter({ hasText: "Concluído" }).click();
+      await metricCards.filter({ hasText: "Total de chamados" }).getByText("1", { exact: true }).waitFor();
+      await administratorPage.getByRole("button", { name: "Status cruzado: Concluído" }).waitFor();
+      await administratorPage.getByText("Recorte: 1/2", { exact: false }).waitFor();
+      await administratorPage.getByRole("button", { name: "Status cruzado: Concluído" }).click();
+      await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
+      await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
     }
 
-    process.stdout.write("QA concluído: auditoria, autorização, saúde, Visão geral real com filtros, mapeamentos e sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, saúde, Visão geral real com filtros e cruzamentos, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await administratorContext.close();

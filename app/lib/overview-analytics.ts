@@ -11,6 +11,7 @@ export type OverviewAnalyticsFilters = {
   sector: string | null;
   priority: string | null;
   status: string | null;
+  reason: string | null;
 };
 
 export type OverviewAnalytics = {
@@ -183,6 +184,7 @@ function normalizeFilters(filters: Partial<OverviewAnalyticsFilters>): OverviewA
     sector: normalizedDimension(filters.sector),
     priority: normalizedDimension(filters.priority),
     status: normalizedDimension(filters.status),
+    reason: normalizedDimension(filters.reason),
   };
 }
 
@@ -352,7 +354,8 @@ export function calculateOverviewAnalytics(
     }
     return matchesCategory(record, "ticket.sector", filters.sector)
       && matchesCategory(record, "ticket.priority", filters.priority)
-      && matchesCategory(record, "ticket.status", filters.status);
+      && matchesCategory(record, "ticket.status", filters.status)
+      && matchesCategory(record, "ticket.reason", filters.reason);
   });
   const openedKeys = tickets.flatMap((record) => {
     const value = readDate(record, "ticket.openedAt");

@@ -53,6 +53,7 @@ O usuário pode reorganizar essa composição, restaurar o arranjo inicial do pa
 - A leitura analítica da visão geral é calculada no servidor sobre o snapshot publicado, com total, média por dia corrido, SLA registrado, pendências, série temporal e distribuições; ausência de amostra produz valor nulo e cobertura explícita, nunca um número demonstrativo silencioso.
 - O painel Visão geral consome exclusivamente essa leitura real e apresenta estados explícitos de carregamento, vazio e falha; controles ainda não conectados ao snapshot permanecem bloqueados para não misturar resultados reais e demonstrativos.
 - Os filtros de período de abertura, setor, prioridade e status da Visão geral são executados no servidor sobre o snapshot publicado; suas opções vêm da própria base e os períodos relativos são ancorados na abertura válida mais recente para manter o resultado reproduzível.
+- Status, prioridade e motivo na Visão geral permitem uma seleção cruzada simples por vez; o clique recalcula todos os indicadores no servidor e mantém um chip removível que explicita a dimensão e o valor ativos.
 - Em caso de falha, permanece visível a última carga íntegra.
 - Registros removidos do Notion são preservados localmente como inativos e excluídos dos indicadores por padrão.
 - Correções de dados são feitas somente no Notion.

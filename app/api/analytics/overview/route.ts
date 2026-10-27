@@ -14,21 +14,22 @@ function noStoreJson(payload: unknown, init?: ResponseInit): Response {
 }
 
 function parseFilters(searchParams: URLSearchParams): OverviewAnalyticsFilters | null {
-  const allowedKeys = new Set(["period", "sector", "priority", "status"]);
+  const allowedKeys = new Set(["period", "sector", "priority", "status", "reason"]);
   if ([...searchParams.keys()].some((key) => !allowedKeys.has(key))) return null;
   if ([...allowedKeys].some((key) => searchParams.getAll(key).length > 1)) return null;
 
   const period = searchParams.get("period") ?? "all";
   if (period !== "all" && period !== "last90" && period !== "last30") return null;
-  const dimension = (key: "sector" | "priority" | "status") => {
+  const dimension = (key: "sector" | "priority" | "status" | "reason") => {
     const value = searchParams.get(key)?.trim() ?? "";
     return value.length > 0 && value.length <= 120 ? value : value.length === 0 ? null : undefined;
   };
   const sector = dimension("sector");
   const priority = dimension("priority");
   const status = dimension("status");
-  if (sector === undefined || priority === undefined || status === undefined) return null;
-  return { period: period as OverviewPeriod, sector, priority, status };
+  const reason = dimension("reason");
+  if (sector === undefined || priority === undefined || status === undefined || reason === undefined) return null;
+  return { period: period as OverviewPeriod, sector, priority, status, reason };
 }
 
 export async function GET(request: Request) {

@@ -66,7 +66,7 @@ test("calcula a visão geral com dias corridos, cobertura e classificações reg
     matchedTickets: 4,
     periodStart: "2026-10-01",
     periodEnd: "2026-10-03",
-    filters: { period: "all", sector: null, priority: null, status: null },
+    filters: { period: "all", sector: null, priority: null, status: null, reason: null },
     options: {
       sectors: ["Farmácia", "Recepção"],
       priorities: ["Crítico", "Alta", "Média"],
@@ -186,6 +186,7 @@ test("aplica período de abertura e dimensões sobre o mesmo recorte real", () =
           "ticket.sector": valid("text", "Farmácia"),
           "ticket.priority": valid("text", "Alta"),
           "ticket.status": valid("text", "Aguardando informação"),
+          "ticket.reason": valid("text", "Computador"),
         }),
         ticket("ticket-filtered", {
           "ticket.openedAt": valid("date", "2026-10-01T10:00:00-03:00"),
@@ -193,6 +194,7 @@ test("aplica período de abertura e dimensões sobre o mesmo recorte real", () =
           "ticket.sector": valid("text", "Farmácia"),
           "ticket.priority": valid("text", "Alta"),
           "ticket.status": valid("text", "Aguardando informação"),
+          "ticket.reason": valid("text", "Impressora"),
           "ticket.slaStatus": valid("text", "Dentro do prazo"),
         }),
         ticket("ticket-other-status", {
@@ -200,17 +202,19 @@ test("aplica período de abertura e dimensões sobre o mesmo recorte real", () =
           "ticket.sector": valid("text", "Farmácia"),
           "ticket.priority": valid("text", "Alta"),
           "ticket.status": valid("text", "Concluído"),
+          "ticket.reason": valid("text", "Computador"),
         }),
         ticket("ticket-anchor", {
           "ticket.openedAt": valid("date", "2026-10-30T10:00:00-03:00"),
           "ticket.sector": valid("text", "Recepção"),
           "ticket.priority": valid("text", "Média"),
           "ticket.status": valid("text", "Concluído"),
+          "ticket.reason": valid("text", "Rede"),
         }),
       ],
       history: [],
     },
-    { period: "last30", sector: "farmacia", priority: "alta", status: "aguardando informação" },
+    { period: "last30", sector: "farmacia", priority: "alta", status: "aguardando informação", reason: "impressora" },
   );
 
   assert.equal(analytics.selection.periodStart, "2026-10-01");
