@@ -13,6 +13,7 @@ import {
   CartesianGrid,
   Cell,
   ComposedChart,
+  Label,
   Line,
   Pie,
   PieChart,
@@ -20,6 +21,7 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  type LabelProps,
 } from "recharts";
 import {
   ActivityIcon,
@@ -480,6 +482,23 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   );
 }
 
+function DonutCenterLabel({ viewBox, value, caption }: { viewBox?: LabelProps["viewBox"]; value: string; caption: string }) {
+  if (!viewBox || !("cx" in viewBox) || !("cy" in viewBox) || !("innerRadius" in viewBox)) return null;
+  const { cx, cy, innerRadius } = viewBox;
+  if (![cx, cy, innerRadius].every((item) => typeof item === "number" && Number.isFinite(item)) || innerRadius <= 0) return null;
+
+  const usableWidth = innerRadius * 1.72;
+  const valueFontSize = Math.max(8, Math.min(innerRadius * 0.62, usableWidth / (Math.max(value.length, 1) * 0.57)));
+  const captionFontSize = Math.max(5.5, Math.min(innerRadius * 0.23, usableWidth / (Math.max(caption.length, 1) * 0.54)));
+
+  return (
+    <g className="donut-center-label" data-center-x={cx} data-center-y={cy} data-inner-radius={innerRadius} pointerEvents="none">
+      <text className="donut-center-label__value" x={cx} y={cy - captionFontSize * 0.28} textAnchor="middle" fontSize={valueFontSize}>{value}</text>
+      <text className="donut-center-label__caption" x={cx} y={cy + valueFontSize * 0.66} textAnchor="middle" fontSize={captionFontSize}>{caption}</text>
+    </g>
+  );
+}
+
 function AnalyticalWidgetState({ state }: { state: OverviewLoadState }) {
   return (
     <div className={`analytical-widget-state analytical-widget-state--${state.status}`}>
@@ -541,6 +560,7 @@ function renderDashboardWidgets(
     const completedPercent = analytics.cards.totalTickets > 0
       ? (completed / analytics.cards.totalTickets) * 100
       : 0;
+    const completedPercentLabel = `${formatMetricNumber(completedPercent)}%`;
     return [
       <div key="overview-demand">
         <WidgetFrame title="Evolução da demanda" subtitle={`Aberturas e conclusões · por ${analytics.demand.granularity === "day" ? "dia" : "mês"}`} editing={editing} detailsEnabled={false} action={<span className="coverage-badge">Cobertura {formatMetricNumber(analytics.cards.averagePerCalendarDay.coveragePercent)}%</span>}>
@@ -563,11 +583,11 @@ function renderDashboardWidgets(
               <PieChart>
                 <Pie isAnimationActive={false} data={liveStatus} dataKey="value" nameKey="name" innerRadius="64%" outerRadius="88%" paddingAngle={2} stroke="none" cursor="pointer" onClick={(data) => onOverviewCrossFilter("status", data.name ?? "Sem classificação")}>
                   {liveStatus.map((item) => <Cell key={item.name} fill={item.color} />)}
+                  <Label content={(props) => <DonutCenterLabel viewBox={props.viewBox} value={completedPercentLabel} caption="concluídos" />} />
                 </Pie>
                 <Tooltip content={<CustomTooltip />} />
               </PieChart>
             </ResponsiveContainer>
-            <div className="donut-center"><strong>{formatMetricNumber(completedPercent)}%</strong><span>concluídos</span></div>
             <div className="legend-list">{liveStatus.map((item) => <button key={item.name} onClick={() => onOverviewCrossFilter("status", item.name)}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.value}</b></button>)}</div>
           </div> : <AnalyticalEmptyResult message={hasMatchingTickets ? "Nenhum status válido foi encontrado no recorte." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>

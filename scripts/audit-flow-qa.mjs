@@ -38,6 +38,36 @@ function rectanglesOverlap(left, right) {
     && left.y + left.height > right.y;
 }
 
+async function assertDonutCenterFits(page) {
+  const measurements = await page.locator(".donut-center-label").evaluate((group) => {
+    const innerRadius = Number(group.getAttribute("data-inner-radius"));
+    const centerX = Number(group.getAttribute("data-center-x"));
+    const centerY = Number(group.getAttribute("data-center-y"));
+    const value = group.querySelector(".donut-center-label__value");
+    const caption = group.querySelector(".donut-center-label__caption");
+    if (!(value instanceof SVGGraphicsElement) || !(caption instanceof SVGGraphicsElement)) return null;
+    const valueBox = value.getBBox();
+    const captionBox = caption.getBBox();
+    return { innerRadius, centerX, centerY, valueBox, captionBox, valueFontSize: Number(value.getAttribute("font-size")) };
+  });
+  if (!measurements) throw new Error("O centro proporcional da rosca não foi renderizado.");
+  const { innerRadius, centerX, centerY, valueBox, captionBox } = measurements;
+  const left = Math.min(valueBox.x, captionBox.x);
+  const right = Math.max(valueBox.x + valueBox.width, captionBox.x + captionBox.width);
+  const top = Math.min(valueBox.y, captionBox.y);
+  const bottom = Math.max(valueBox.y + valueBox.height, captionBox.y + captionBox.height);
+  if (
+    !Number.isFinite(innerRadius)
+    || left < centerX - innerRadius * 0.88
+    || right > centerX + innerRadius * 0.88
+    || top < centerY - innerRadius * 0.82
+    || bottom > centerY + innerRadius * 0.82
+  ) {
+    throw new Error("A porcentagem ou sua legenda ultrapassou a área interna da rosca.");
+  }
+  return measurements;
+}
+
 function rememberApplicationOutput(chunk) {
   applicationOutput = `${applicationOutput}${chunk.toString()}`.slice(-12_000);
 }
@@ -549,6 +579,25 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByText("Evolução da demanda", { exact: true }).waitFor();
       await administratorPage.getByText("Distribuição por status", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
+      const compactDonut = await assertDonutCenterFits(administratorPage);
+      const donutWrap = administratorPage.locator(".donut-wrap");
+      const originalDonutStyle = await donutWrap.getAttribute("style");
+      await donutWrap.evaluate((element) => {
+        element.style.width = "600px";
+        element.style.height = "300px";
+      });
+      await administratorPage.waitForFunction(
+        (fontSize) => Number(document.querySelector(".donut-center-label__value")?.getAttribute("font-size")) > fontSize,
+        compactDonut.valueFontSize,
+      );
+      const expandedDonut = await assertDonutCenterFits(administratorPage);
+      if (expandedDonut.innerRadius <= compactDonut.innerRadius || expandedDonut.valueFontSize <= compactDonut.valueFontSize) {
+        throw new Error("A porcentagem central não acompanhou o crescimento da rosca.");
+      }
+      await donutWrap.evaluate((element, originalStyle) => {
+        if (originalStyle === null) element.removeAttribute("style");
+        else element.setAttribute("style", originalStyle);
+      }, originalDonutStyle);
       if (await administratorPage.getByText("518", { exact: true }).count()) {
         throw new Error("A Visão geral ainda exibiu o total demonstrativo após carregar o snapshot real.");
       }
@@ -588,6 +637,7 @@ async function runAuditFlow(baseUrl) {
       await metricCards.filter({ hasText: "Total de chamados" }).getByText("1", { exact: true }).waitFor();
       await administratorPage.getByRole("button", { name: "Status cruzado: Concluído" }).waitFor();
       await administratorPage.getByText("Recorte: 1/2", { exact: false }).waitFor();
+      await assertDonutCenterFits(administratorPage);
       await administratorPage.getByRole("button", { name: "Status cruzado: Concluído" }).click();
       await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();

@@ -234,9 +234,8 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .chart-tooltip i, .legend-list i { width: 7px; height: 7px; border-radius: 2px; }
 .chart-tooltip b { color: var(--ink); margin-left: auto; }
 .donut-wrap { position: relative; height: 100%; }
-.donut-center { pointer-events: none; position: absolute; top: 21%; left: 50%; display: grid; justify-items: center; transform: translate(-50%, -50%); }
-.donut-center strong { font-size: 19px; letter-spacing: -0.8px; }
-.donut-center span { color: var(--ink-faint); font-size: 7px; }
+.donut-center-label__value { fill: var(--ink); font-weight: 780; letter-spacing: -0.04em; }
+.donut-center-label__caption { fill: var(--ink-faint); font-weight: 500; }
 .legend-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 8px; margin: 0 5px; }
 .legend-list button { min-width: 0; height: 18px; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 5px; border: 0; background: transparent; cursor: pointer; color: var(--ink-soft); padding: 0 3px; font-size: 7px; text-align: left; }
 .legend-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
