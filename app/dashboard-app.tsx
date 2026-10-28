@@ -74,9 +74,6 @@ import {
   indicators,
   movementTimeline,
   movementTypeData,
-  oldestPending,
-  pendingAgeData,
-  pendingCompositionData,
   responseHistogram,
   slaByPriority,
   stageCompositionData,
@@ -114,6 +111,7 @@ import { dashboardLayouts } from "./lib/dashboard-layouts";
 import { createBoundedDashboardCompactor, dashboardLayoutFitsBounds, magnetizeDashboardItem, resolveDashboardLayoutCollisions } from "./lib/dashboard-layout-collisions";
 import type { DemandAnalytics } from "./lib/demand-analytics";
 import type { OverviewAnalytics } from "./lib/overview-analytics";
+import type { PendingAnalytics } from "./lib/pending-analytics";
 import type { UserRole } from "./lib/user-store";
 
 type View = "catalog" | "dashboard" | "admin";
@@ -181,6 +179,11 @@ type DemandLoadState =
   | { status: "ready"; data: DemandAnalytics; message: string }
   | { status: "empty" | "error"; data: null; message: string };
 
+type PendingLoadState =
+  | { status: "loading"; data: null; message: string }
+  | { status: "ready"; data: PendingAnalytics; message: string }
+  | { status: "empty" | "error"; data: null; message: string };
+
 type OverviewDetailRow = {
   rowKey: string;
   code: string;
@@ -241,6 +244,16 @@ async function loadDemandAnalytics(filters: Filters, crossFilter: OverviewCrossF
   return payload.data ?? null;
 }
 
+async function loadPendingAnalytics(filters: Filters, crossFilter: OverviewCrossFilter | null, signal?: AbortSignal): Promise<PendingAnalytics | null> {
+  const searchParams = createOverviewSearchParams(filters, crossFilter);
+  const response = await fetch(`/api/analytics/pending?${searchParams}`, { cache: "no-store", signal });
+  const payload = await response.json().catch(() => null) as { ok?: boolean; data?: PendingAnalytics | null; error?: string } | null;
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error ?? "Não foi possível carregar a análise de pendências.");
+  }
+  return payload.data ?? null;
+}
+
 async function loadOverviewDetails(
   filters: Filters,
   crossFilter: OverviewCrossFilter | null,
@@ -282,6 +295,15 @@ async function downloadOverviewCsv(filters: Filters, crossFilter: OverviewCrossF
 
 function formatMetricNumber(value: number | null, maximumFractionDigits = 2): string {
   return value === null ? "—" : value.toLocaleString("pt-BR", { maximumFractionDigits });
+}
+
+function formatAgeHours(value: number | null): string {
+  if (value === null) return "—";
+  const rounded = Math.max(0, Math.round(value));
+  const days = Math.floor(rounded / 24);
+  const hours = rounded % 24;
+  if (days === 0) return `${hours}h`;
+  return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
 }
 
 function formatAnalyticsDate(value: string): string {
@@ -346,6 +368,26 @@ function demandMetrics(state: DemandLoadState): MetricDefinition[] {
     { id: "metric-average", value: formatMetricNumber(cards.averagePerCalendarDay.value), title: "Aberturas por dia", delta: `${cards.averagePerCalendarDay.calendarDays} dias corridos` },
     { id: "metric-variation", value: variationLabel, title: "Variação da demanda", delta: variationDelta, tone: variationValue !== null && variationValue > 0 ? "warning" : "default" },
     { id: "metric-reasons", value: formatMetricNumber(cards.distinctReasons.value, 0), title: "Motivos registrados", delta: `${formatMetricNumber(cards.distinctReasons.coveragePercent)}% de cobertura` },
+  ];
+}
+
+function pendingMetrics(state: PendingLoadState): MetricDefinition[] {
+  if (state.status !== "ready") {
+    const value = state.status === "loading" ? "…" : "—";
+    return [
+      { id: "metric-total", value, title: "Pendências atuais", delta: state.message, tone: "primary" },
+      { id: "metric-age", value, title: "Idade mediana", delta: state.message },
+      { id: "metric-supplier", value, title: "Com fornecedor", delta: state.message },
+      { id: "metric-owner", value, title: "Sem responsável", delta: state.message, tone: "warning" },
+    ];
+  }
+
+  const { cards } = state.data;
+  return [
+    { id: "metric-total", value: formatMetricNumber(cards.total.value, 0), title: "Pendências atuais", delta: `${formatMetricNumber(cards.total.coveragePercent)}% com status válido`, tone: "primary" },
+    { id: "metric-age", value: formatAgeHours(cards.medianAgeHours.value), title: "Idade mediana", delta: `N = ${cards.medianAgeHours.validOpenings} aberturas válidas` },
+    { id: "metric-supplier", value: formatMetricNumber(cards.withSupplier.value, 0), title: "Com fornecedor", delta: `${formatMetricNumber(cards.withSupplier.percentage)}% da fila` },
+    { id: "metric-owner", value: formatMetricNumber(cards.withoutAssignee.value, 0), title: "Sem responsável", delta: `${formatMetricNumber(cards.withoutAssignee.coveragePercent)}% avaliados`, tone: cards.withoutAssignee.value > 0 ? "warning" : "default" },
   ];
 }
 
@@ -537,7 +579,7 @@ function Catalog({ onOpen }: { onOpen: (key: DashboardKey) => void }) {
         <div>
           <span className="catalog-hero__badge"><TrendUpIcon size={15} /> Resumo da base</span>
           <h2>Uma visão confiável da operação, sem ruído.</h2>
-          <p>A Visão geral usa o último snapshot íntegro do Notion; os demais painéis identificam dados demonstrativos enquanto são conectados.</p>
+          <p>Visão geral, Demanda e Pendências usam o último snapshot íntegro do Notion; os demais painéis identificam dados demonstrativos enquanto são conectados.</p>
         </div>
         <div className="catalog-hero__numbers">
           <span><strong>47</strong><small>indicadores</small></span>
@@ -566,10 +608,10 @@ function Catalog({ onOpen }: { onOpen: (key: DashboardKey) => void }) {
   );
 }
 
-function MetricCard({ title, value, delta, tone = "default", editing, onOpen }: { title: string; value: string; delta: string; tone?: "default" | "primary" | "warning"; editing: boolean; onOpen: () => void }) {
+function MetricCard({ title, value, delta, tone = "default", editing, detailsEnabled = true, onOpen }: { title: string; value: string; delta: string; tone?: "default" | "primary" | "warning"; editing: boolean; detailsEnabled?: boolean; onOpen: () => void }) {
   return (
-    <button className={cn("metric-card", `metric-card--${tone}`, editing && "metric-card--editing")} onClick={() => { if (!editing) onOpen(); }}>
-      <span className="metric-card__top widget-drag-handle"><small>{title}</small>{editing ? <DotsSixVerticalIcon size={16} weight="bold" /> : <ArrowUpRightIcon size={16} />}</span>
+    <button className={cn("metric-card", `metric-card--${tone}`, editing && "metric-card--editing", !editing && !detailsEnabled && "metric-card--static")} onClick={() => { if (!editing && detailsEnabled) onOpen(); }}>
+      <span className="metric-card__top widget-drag-handle"><small>{title}</small>{editing ? <DotsSixVerticalIcon size={16} weight="bold" /> : detailsEnabled ? <ArrowUpRightIcon size={16} /> : null}</span>
       <strong>{value}</strong>
       <span className="metric-card__delta"><TrendUpIcon size={13} weight="bold" />{delta}</span>
     </button>
@@ -615,7 +657,7 @@ function DonutCenterLabel({ viewBox, value, caption }: { viewBox?: LabelProps["v
   );
 }
 
-function AnalyticalWidgetState({ state }: { state: OverviewLoadState | DemandLoadState }) {
+function AnalyticalWidgetState({ state }: { state: OverviewLoadState | DemandLoadState | PendingLoadState }) {
   return (
     <div className={`analytical-widget-state analytical-widget-state--${state.status}`}>
       {state.status === "loading" ? <ArrowsClockwiseIcon className="spin" size={24} /> : <DatabaseIcon size={24} />}
@@ -640,6 +682,7 @@ function renderDashboardWidgets(
   onOverviewCrossFilter: (field: OverviewCrossFilter["field"], value: string) => void,
   overviewState: OverviewLoadState,
   demandState: DemandLoadState,
+  pendingState: PendingLoadState,
   onOpenOverviewDetails: () => void,
 ) {
   const chartGrid = <CartesianGrid stroke="#edf0ed" vertical={false} />;
@@ -815,38 +858,46 @@ function renderDashboardWidgets(
   }
 
   if (dashboardKey === "pending") {
+    if (pendingState.status !== "ready") {
+      return [
+        <div key="pending-age"><WidgetFrame title="Idade das pendências" subtitle="Faixas de tempo desde a abertura" editing={editing} detailsEnabled={false}><AnalyticalWidgetState state={pendingState} /></WidgetFrame></div>,
+        <div key="pending-oldest"><WidgetFrame title="Pendências mais antigas" subtitle="Prioridade para revisão da fila" editing={editing} detailsEnabled={false}><AnalyticalWidgetState state={pendingState} /></WidgetFrame></div>,
+        <div key="pending-composition"><WidgetFrame title="Composição das pendências" subtitle="Setor × prioridade registrada" editing={editing} detailsEnabled={false}><AnalyticalWidgetState state={pendingState} /></WidgetFrame></div>,
+      ];
+    }
+    const analytics = pendingState.data;
+    const priorityColors = ["#b5474c", "#d85b4b", "#e6a943", "#6f9d85", "#83a995", "#6489b5", "#adb4af"];
+    const composition = analytics.composition.items.map((item) => ({ name: item.sector, ...item.values }));
     return [
       <div key="pending-age">
-        <WidgetFrame title="Idade das pendências" subtitle="Faixas de tempo desde a abertura" editing={editing} action={<span className="sample-badge">N = 5</span>}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={pendingAgeData} margin={{ top: 8, right: 12, left: -24, bottom: 0 }}>
+        <WidgetFrame title="Idade das pendências" subtitle={`Cobertura ${formatMetricNumber(analytics.age.coveragePercent)}% · referência na publicação`} editing={editing} detailsEnabled={false} action={<span className="sample-badge">N = {analytics.age.validOpenings}</span>}>
+          {analytics.age.validOpenings > 0 ? <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={analytics.age.buckets} margin={{ top: 8, right: 12, left: -24, bottom: 0 }}>
               {chartGrid}
               <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#747d77" }} />
               <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#8c958f" }} />
               <Tooltip content={<CustomTooltip />} />
               <Bar isAnimationActive={false} dataKey="value" name="Pendências" fill="#d29a3d" radius={[5, 5, 0, 0]} maxBarSize={44} />
             </BarChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer> : <AnalyticalEmptyResult message={analytics.selection.pendingTickets > 0 ? "As pendências não possuem data de abertura válida para calcular a idade." : "Nenhuma pendência corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="pending-oldest">
-        <WidgetFrame title="Pendências mais antigas" subtitle="Prioridade para revisão da fila" editing={editing}>
-          <div className="ranked-list">{oldestPending.map((item, index) => <button key={item.id} onClick={() => setCrossFilter(item.id)}><span className="ranked-list__index">{index + 1}</span><span><strong>{item.id} · {item.reason}</strong><small>{item.sector}</small></span><b>{item.age}</b></button>)}</div>
+        <WidgetFrame title="Pendências mais antigas" subtitle="Até cinco registros com abertura válida" editing={editing} detailsEnabled={false}>
+          {analytics.oldest.length > 0 ? <div className="ranked-list">{analytics.oldest.map((item, index) => <div className="ranked-list__item" key={item.rowKey}><span className="ranked-list__index">{index + 1}</span><span><strong>{item.code} · {item.reason}</strong><small>{item.sector} · {item.priority}</small></span><b>{formatAgeHours(item.ageHours)}</b></div>)}</div> : <AnalyticalEmptyResult message={analytics.selection.pendingTickets > 0 ? "As pendências não possuem abertura válida para ordenação." : "Nenhuma pendência corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="pending-composition">
-        <WidgetFrame title="Composição das pendências" subtitle="Setor × prioridade registrada" editing={editing}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={pendingCompositionData} layout="vertical" margin={{ top: 4, right: 18, left: 6, bottom: 0 }}>
+        <WidgetFrame title="Composição das pendências" subtitle={`Setor × prioridade · cobertura ${formatMetricNumber(analytics.composition.coveragePercent)}%`} editing={editing} detailsEnabled={false}>
+          {composition.length > 0 && analytics.composition.priorities.length > 0 ? <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={composition} layout="vertical" margin={{ top: 4, right: 18, left: 6, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ed" horizontal={false} />
               <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#8c958f" }} />
               <YAxis type="category" dataKey="name" width={96} tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#606963" }} />
               <Tooltip content={<CustomTooltip />} />
-              <Bar isAnimationActive={false} dataKey="critica" name="Crítica" stackId="pending" fill="#b5474c" maxBarSize={22} />
-              <Bar isAnimationActive={false} dataKey="alta" name="Alta" stackId="pending" fill="#e6a943" maxBarSize={22} />
-              <Bar isAnimationActive={false} dataKey="media" name="Média" stackId="pending" fill="#6f9d85" radius={[0, 5, 5, 0]} maxBarSize={22} />
+              {analytics.composition.priorities.map((priority, index) => <Bar key={priority.key} isAnimationActive={false} dataKey={priority.key} name={priority.label} stackId="pending" fill={priorityColors[index % priorityColors.length]} radius={index === analytics.composition.priorities.length - 1 ? [0, 5, 5, 0] : undefined} maxBarSize={22} />)}
             </BarChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer> : <AnalyticalEmptyResult message={analytics.selection.pendingTickets > 0 ? "Setor e prioridade não possuem cobertura conjunta suficiente." : "Nenhuma pendência corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
     ];
@@ -1046,6 +1097,9 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   const [demandState, setDemandState] = useState<DemandLoadState>(() => dashboardKey === "demand"
     ? { status: "loading", data: null, message: "Consultando a análise de demanda publicada." }
     : { status: "empty", data: null, message: "Modelo analítico não utilizado neste painel." });
+  const [pendingState, setPendingState] = useState<PendingLoadState>(() => dashboardKey === "pending"
+    ? { status: "loading", data: null, message: "Consultando a fila publicada." }
+    : { status: "empty", data: null, message: "Modelo analítico não utilizado neste painel." });
   const { width, containerRef, mounted } = useContainerWidth();
   const boundedDashboardCompactor = useMemo(() => createBoundedDashboardCompactor(DASHBOARD_PAGE_MAX_ROWS), []);
   const interactionStartLayout = useRef<Layout | null>(null);
@@ -1173,6 +1227,24 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     return () => controller.abort();
   }, [dashboardKey, filters, overviewCrossFilter]);
 
+  useEffect(() => {
+    if (dashboardKey !== "pending") return;
+    const controller = new AbortController();
+    void loadPendingAnalytics(filters, overviewCrossFilter, controller.signal)
+      .then((data) => setPendingState(data
+        ? { status: "ready", data, message: "Fila publicada carregada." }
+        : { status: "empty", data: null, message: "Conclua uma sincronização para publicar as primeiras pendências reais." }))
+      .catch((loadError) => {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setPendingState({
+          status: "error",
+          data: null,
+          message: loadError instanceof Error ? loadError.message : "Não foi possível carregar a análise de pendências.",
+        });
+      });
+    return () => controller.abort();
+  }, [dashboardKey, filters, overviewCrossFilter]);
+
   function setLayout(updater: Layout | ((current: Layout) => Layout)) {
     setDraftEditor((state) => {
       const page = state.current.pages.find((candidate) => candidate.id === activePageId) ?? state.current.pages[0];
@@ -1197,6 +1269,9 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     }
     if (dashboardKey === "demand") {
       setDemandState({ status: "loading", data: null, message });
+    }
+    if (dashboardKey === "pending") {
+      setPendingState({ status: "loading", data: null, message });
     }
   }
 
@@ -1410,12 +1485,14 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     flash("Métrica removida do rascunho; salve para confirmar");
   }
 
-  const usesPublishedAnalytics = dashboardKey === "overview" || dashboardKey === "demand";
+  const usesPublishedAnalytics = dashboardKey === "overview" || dashboardKey === "demand" || dashboardKey === "pending";
   const metrics = dashboardKey === "overview"
     ? overviewMetrics(overviewState)
     : dashboardKey === "demand"
       ? demandMetrics(demandState)
-      : themeMetrics[dashboardKey];
+      : dashboardKey === "pending"
+        ? pendingMetrics(pendingState)
+        : themeMetrics[dashboardKey];
   const allMetrics = usesPublishedAnalytics
     ? metrics
     : metrics.map((metric) => metric.id === "metric-total" && scale !== 1 ? { ...metric, value: String(Math.round(Number(metric.value) * scale)) } : metric);
@@ -1424,17 +1501,28 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     ? overviewState.data
     : dashboardKey === "demand" && demandState.status === "ready"
       ? demandState.data
-      : null;
-  const analyticalMessage = dashboardKey === "overview" ? overviewState.message : demandState.message;
+      : dashboardKey === "pending" && pendingState.status === "ready"
+        ? pendingState.data
+        : null;
+  const analyticalMessage = dashboardKey === "overview"
+    ? overviewState.message
+    : dashboardKey === "demand"
+      ? demandState.message
+      : pendingState.message;
   const analyticalPeriod = analyticalData?.selection.periodStart && analyticalData.selection.periodEnd
     ? `${formatAnalyticsDate(analyticalData.selection.periodStart)} — ${formatAnalyticsDate(analyticalData.selection.periodEnd)}`
     : "Período indisponível";
   const filterOptions = analyticalData?.selection.options ?? demoFilterOptions;
   const analyticalFiltersAvailable = !usesPublishedAnalytics || analyticalData !== null;
+  const analyticalSelectionLabel = dashboardKey === "pending" && pendingState.status === "ready"
+    ? `Fila: ${pendingState.data.selection.pendingTickets} · recorte: ${pendingState.data.selection.matchedTickets}/${pendingState.data.selection.totalTickets}`
+    : analyticalData
+      ? `Recorte: ${analyticalData.selection.matchedTickets}/${analyticalData.selection.totalTickets}`
+      : null;
   const dataQualityLabel = !usesPublishedAnalytics
     ? "Base demonstrativa · conexão analítica pendente"
-    : analyticalData
-      ? `Recorte: ${analyticalData.selection.matchedTickets}/${analyticalData.selection.totalTickets} · ${analyticalData.snapshot.warningCount} alerta(s) · carga ${new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(analyticalData.snapshot.publishedAt))}`
+    : analyticalData && analyticalSelectionLabel
+      ? `${analyticalSelectionLabel} · ${analyticalData.snapshot.warningCount} alerta(s) · carga ${new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(analyticalData.snapshot.publishedAt))}`
       : analyticalMessage;
 
   return (
@@ -1532,11 +1620,11 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
 
             {visibleMetrics.map((metric) => (
               <div key={metric.id}>
-                <MetricCard title={metric.title} value={metric.value} delta={metric.delta} tone={metric.tone} editing={editing} onOpen={() => setDetailsOpen(true)} />
+                <MetricCard title={metric.title} value={metric.value} delta={metric.delta} tone={metric.tone} editing={editing} detailsEnabled={dashboardKey !== "pending"} onOpen={() => setDetailsOpen(true)} />
               </div>
             ))}
 
-            {renderDashboardWidgets(dashboardKey, editing, setCrossFilter, applyOverviewCrossFilter, overviewState, demandState, () => setDetailsOpen(true))
+            {renderDashboardWidgets(dashboardKey, editing, setCrossFilter, applyOverviewCrossFilter, overviewState, demandState, pendingState, () => setDetailsOpen(true))
               .filter((widget) => activeLayoutIds.has(String(widget.key)))}
 
             {customWidgets.map((widget) => (

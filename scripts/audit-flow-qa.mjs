@@ -324,6 +324,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousOverview.status() !== 401) throw new Error("A visão geral analítica aceitou uma consulta anônima.");
     const anonymousDemand = await anonymousContext.request.get(`${baseUrl}/api/analytics/demand`);
     if (anonymousDemand.status() !== 401) throw new Error("A análise de demanda aceitou uma consulta anônima.");
+    const anonymousPending = await anonymousContext.request.get(`${baseUrl}/api/analytics/pending`);
+    if (anonymousPending.status() !== 401) throw new Error("A análise de pendências aceitou uma consulta anônima.");
     const anonymousOverviewDetails = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/details`);
     if (anonymousOverviewDetails.status() !== 401) throw new Error("O detalhamento analítico aceitou uma consulta anônima.");
     const anonymousOverviewExport = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/export`);
@@ -375,6 +377,8 @@ async function runAuditFlow(baseUrl) {
     if (analystOverviewBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a visão geral analítica.");
     const analystDemandBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/demand`);
     if (analystDemandBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a análise de demanda.");
+    const analystPendingBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/pending`);
+    if (analystPendingBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a análise de pendências.");
     const analystDetailsBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/details`);
     if (analystDetailsBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou o detalhamento analítico.");
     const analystExportBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/export`);
@@ -488,6 +492,12 @@ async function runAuditFlow(baseUrl) {
     const demandPayload = await demandResponse.json();
     if (demandPayload.data !== null || demandPayload.reason !== "no_snapshot") {
       throw new Error("A análise de demanda não representou corretamente a ausência de snapshot no banco descartável.");
+    }
+    const pendingResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/pending`);
+    if (!pendingResponse.ok()) throw new Error("A conta autenticada não conseguiu consultar a análise de pendências.");
+    const pendingPayload = await pendingResponse.json();
+    if (pendingPayload.data !== null || pendingPayload.reason !== "no_snapshot") {
+      throw new Error("A análise de pendências não representou corretamente a ausência de snapshot no banco descartável.");
     }
 
     await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
@@ -621,6 +631,28 @@ async function runAuditFlow(baseUrl) {
       }
       const invalidDemandFilterResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/demand?period=invalid`);
       if (invalidDemandFilterResponse.status() !== 400) throw new Error("A análise de demanda aceitou um período analítico inválido.");
+
+      const publishedPendingResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/pending?period=all`);
+      if (!publishedPendingResponse.ok()) throw new Error("A análise de pendências não conseguiu ler o snapshot descartável publicado.");
+      const publishedPending = await publishedPendingResponse.json();
+      if (
+        publishedPending.data?.selection?.matchedTickets !== 2
+        || publishedPending.data?.selection?.pendingTickets !== 1
+        || publishedPending.data?.cards?.total?.value !== 1
+        || publishedPending.data?.cards?.withSupplier?.value !== 0
+        || publishedPending.data?.cards?.withoutAssignee?.value !== 1
+        || publishedPending.data?.age?.validOpenings !== 1
+        || publishedPending.data?.composition?.coveragePercent !== 100
+      ) {
+        throw new Error("A análise de pendências não calculou corretamente o snapshot descartável publicado.");
+      }
+      const filteredPendingResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/pending?period=all&sector=${encodeURIComponent("Farmácia")}&priority=${encodeURIComponent("Média")}`);
+      const filteredPending = await filteredPendingResponse.json();
+      if (!filteredPendingResponse.ok() || filteredPending.data?.selection?.matchedTickets !== 1 || filteredPending.data?.cards?.total?.value !== 1) {
+        throw new Error("A análise de pendências não reutilizou os filtros analíticos do snapshot.");
+      }
+      const invalidPendingFilterResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/pending?period=invalid`);
+      if (invalidPendingFilterResponse.status() !== 400) throw new Error("A análise de pendências aceitou um período analítico inválido.");
 
       const detailsResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/details?period=all&page=1&pageSize=1`);
       if (!detailsResponse.ok()) throw new Error("O Administrador não conseguiu consultar o detalhamento analítico.");
@@ -828,6 +860,20 @@ async function runAuditFlow(baseUrl) {
         throw new Error("O painel Demanda liberou uma exportação ainda não conectada ao contrato próprio.");
       }
 
+      await administratorPage.getByRole("button", { name: "Pendências", exact: true }).click();
+      await administratorPage.getByRole("heading", { name: "Pendências" }).waitFor();
+      const pendingMetricCards = administratorPage.locator(".metric-card");
+      await pendingMetricCards.filter({ hasText: "Pendências atuais" }).getByText("1", { exact: true }).waitFor();
+      await pendingMetricCards.filter({ hasText: "Com fornecedor" }).getByText("0", { exact: true }).waitFor();
+      await pendingMetricCards.filter({ hasText: "Sem responsável" }).getByText("1", { exact: true }).waitFor();
+      await administratorPage.getByText("Idade das pendências", { exact: true }).waitFor();
+      await administratorPage.getByText("Pendências mais antigas", { exact: true }).waitFor();
+      await administratorPage.getByText("Composição das pendências", { exact: true }).waitFor();
+      await administratorPage.getByText("Fila: 1 · recorte: 2/2", { exact: false }).waitFor();
+      if (!(await administratorPage.getByRole("button", { name: "Exportar CSV", exact: true }).isDisabled())) {
+        throw new Error("O painel Pendências liberou uma exportação ainda não conectada ao contrato próprio.");
+      }
+
       await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
       await administratorPage.getByRole("heading", { name: "Visão geral" }).waitFor();
 
@@ -873,7 +919,7 @@ async function runAuditFlow(baseUrl) {
       }
     }
 
-    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral e Demanda reais, detalhamento protegido, exportação CSV, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral, Demanda e Pendências reais, detalhamento protegido, exportação CSV, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await analystContext.close();

@@ -209,6 +209,10 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .react-resizable-handle-ne, .react-resizable-handle-nw, .react-resizable-handle-se, .react-resizable-handle-sw { width: 17px; height: 17px; z-index: 4; }
 .metric-card { width: 100%; height: 100%; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; background: white; cursor: pointer; padding: 12px 14px; text-align: left; box-shadow: var(--shadow-sm); }
 .metric-card:hover { border-color: #b9c9bf; }
+.metric-card--static { cursor: default; }
+.metric-card--static:hover { border-color: var(--line); }
+.metric-card--primary.metric-card--static:hover { border-color: var(--green-700); }
+.metric-card--warning.metric-card--static:hover { border-color: #ebd5ae; }
 .metric-card--editing { border-style: dashed; border-color: #91b8a2; }
 .metric-card--editing .metric-card__top { cursor: grab; }
 .metric-card--primary { border-color: var(--green-700); background: var(--green-700); color: white; }
@@ -277,10 +281,11 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .heatmap-scale i:nth-of-type(4) { background: rgba(23,111,76,0.88); }
 
 .ranked-list { height: 100%; display: grid; align-content: start; gap: 5px; padding: 0 4px; }
-.ranked-list button { display: grid; grid-template-columns: 25px minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 0; border-radius: 9px; background: var(--surface-subtle); cursor: pointer; padding: 8px; text-align: left; }
+.ranked-list button, .ranked-list__item { display: grid; grid-template-columns: 25px minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 0; border-radius: 9px; background: var(--surface-subtle); padding: 8px; text-align: left; }
+.ranked-list button { cursor: pointer; }
 .ranked-list button:hover { background: var(--green-50); }
 .ranked-list__index { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; background: white; color: var(--green-700); font-size: 9px; font-weight: 750; }
-.ranked-list button > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
+.ranked-list button > span:nth-child(2), .ranked-list__item > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
 .ranked-list strong { overflow: hidden; color: var(--ink); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .ranked-list small { color: var(--ink-faint); font-size: 7px; }
 .ranked-list b { color: var(--amber); font-size: 9px; }
