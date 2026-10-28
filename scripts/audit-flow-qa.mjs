@@ -38,6 +38,40 @@ function rectanglesOverlap(left, right) {
     && left.y + left.height > right.y;
 }
 
+async function assertDemandHeatmapLayout(page) {
+  const widget = page.locator(".widget").filter({ hasText: "Demanda por dia e horário" }).first();
+  const measurements = await widget.evaluate((element) => {
+    const box = (target) => {
+      const bounds = target?.getBoundingClientRect();
+      return bounds ? { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right } : null;
+    };
+    const rows = [...element.querySelectorAll(".heatmap-row")];
+    return {
+      widget: box(element),
+      header: box(element.querySelector(".widget__header")),
+      content: box(element.querySelector(".widget__content")),
+      axis: box(element.querySelector(".heatmap-axis")),
+      firstRow: box(rows[0]),
+      lastRow: box(rows.at(-1)),
+      scale: box(element.querySelector(".heatmap-scale")),
+    };
+  });
+  const { widget: widgetBox, header, content, axis, firstRow, lastRow, scale } = measurements;
+  if (!widgetBox || !header || !content || !axis || !firstRow || !lastRow || !scale) {
+    throw new Error("O mapa de calor não apresentou todas as regiões necessárias para validar o layout.");
+  }
+  const tolerance = 0.75;
+  if (axis.top < header.bottom - tolerance || firstRow.top < axis.bottom - tolerance) {
+    throw new Error("O título ou a legenda horária estão sobrepostos no mapa de calor.");
+  }
+  if (scale.top < lastRow.bottom - tolerance) {
+    throw new Error("A escala de volume está sobrepondo a última linha do mapa de calor.");
+  }
+  if (scale.bottom > content.bottom + tolerance || scale.bottom > widgetBox.bottom - tolerance) {
+    throw new Error("A escala de volume ultrapassou os limites do bloco do mapa de calor.");
+  }
+}
+
 async function assertDonutCenterFits(page) {
   const measurements = await page.locator(".donut-center-label").evaluate((group) => {
     const innerRadius = Number(group.getAttribute("data-inner-radius"));
@@ -786,6 +820,7 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByText("Demanda por dia e horário", { exact: true }).waitFor();
       await administratorPage.getByText("Pareto dos motivos", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
+      await assertDemandHeatmapLayout(administratorPage);
       if (await administratorPage.getByText("518", { exact: true }).count()) {
         throw new Error("O painel Demanda ainda exibiu valores demonstrativos após carregar o snapshot real.");
       }

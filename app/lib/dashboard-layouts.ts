@@ -18,7 +18,7 @@ export const dashboardLayouts: Record<DashboardKey, DraftLayoutItem[]> = {
     { i: "metric-variation", x: 6, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
     { i: "metric-reasons", x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
     { i: "demand-trend", x: 0, y: 2, w: 7, h: 5, minW: 4, minH: 4 },
-    { i: "demand-heatmap", x: 7, y: 2, w: 5, h: 5, minW: 4, minH: 4 },
+    { i: "demand-heatmap", x: 7, y: 2, w: 5, h: 5, minW: 4, minH: 5 },
     { i: "demand-reasons", x: 0, y: 7, w: 5, h: 5, minW: 4, minH: 4 },
     { i: "demand-pareto", x: 5, y: 7, w: 7, h: 5, minW: 4, minH: 4 },
   ],
