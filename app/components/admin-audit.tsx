@@ -21,14 +21,15 @@ type AuditAction =
   | "sync.mapping_saved"
   | "sync.preflight_completed"
   | "sync.run_completed"
-  | "sync.run_recovered";
+  | "sync.run_recovered"
+  | "analytics.overview_exported";
 
 type AuditEvent = {
   id: string;
   occurredAt: string;
   actor: { userId: string; displayName: string; role: "administrador" | "analista" } | null;
   action: AuditAction;
-  targetType: "account" | "session" | "integration";
+  targetType: "account" | "session" | "integration" | "snapshot";
   targetId: string | null;
   targetLabel: string | null;
   outcome: "success" | "failure";
@@ -48,6 +49,7 @@ const actionLabels: Record<AuditAction, string> = {
   "sync.preflight_completed": "Pré-validação do Notion concluída",
   "sync.run_completed": "Sincronização do Notion concluída",
   "sync.run_recovered": "Execução interrompida encerrada",
+  "analytics.overview_exported": "Visão geral exportada",
 };
 
 async function fetchAuditEvents(signal?: AbortSignal): Promise<AuditEvent[]> {
@@ -77,7 +79,7 @@ export function AdminAudit() {
   const [referenceTime, setReferenceTime] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [category, setCategory] = useState<"all" | "auth" | "user" | "sync">("all");
+  const [category, setCategory] = useState<"all" | "auth" | "user" | "sync" | "analytics">("all");
   const [outcome, setOutcome] = useState<"all" | "success" | "failure">("all");
   const [search, setSearch] = useState("");
 
@@ -132,7 +134,7 @@ export function AdminAudit() {
   return (
     <div className="admin-audit">
       <div className="admin-section-heading">
-        <div><h2>Log de auditoria</h2><p>Rastreabilidade append-only de autenticação, usuários e integrações.</p></div>
+        <div><h2>Log de auditoria</h2><p>Rastreabilidade append-only de autenticação, usuários, integrações e exportações.</p></div>
         <button className="button button--ghost" disabled={loading} onClick={() => void refresh()}><ArrowsClockwiseIcon className={loading ? "spin" : ""} size={17} />Atualizar</button>
       </div>
 
@@ -145,7 +147,7 @@ export function AdminAudit() {
 
       <div className="admin-audit__filters">
         <label className="admin-audit__search"><MagnifyingGlassIcon size={15} /><span className="sr-only">Buscar eventos</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar ator, alvo ou evento..." /></label>
-        <label><span>Categoria</span><select value={category} onChange={(event) => setCategory(event.target.value as typeof category)}><option value="all">Todas</option><option value="auth">Autenticação</option><option value="user">Usuários</option><option value="sync">Sincronização</option></select></label>
+        <label><span>Categoria</span><select value={category} onChange={(event) => setCategory(event.target.value as typeof category)}><option value="all">Todas</option><option value="auth">Autenticação</option><option value="user">Usuários</option><option value="sync">Sincronização</option><option value="analytics">Exportações</option></select></label>
         <label><span>Resultado</span><select value={outcome} onChange={(event) => setOutcome(event.target.value as typeof outcome)}><option value="all">Todos</option><option value="success">Sucesso</option><option value="failure">Falha</option></select></label>
         <small>{filteredEvents.length} de {events.length} eventos</small>
       </div>

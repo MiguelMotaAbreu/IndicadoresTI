@@ -290,6 +290,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousOverview.status() !== 401) throw new Error("A visão geral analítica aceitou uma consulta anônima.");
     const anonymousOverviewDetails = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/details`);
     if (anonymousOverviewDetails.status() !== 401) throw new Error("O detalhamento analítico aceitou uma consulta anônima.");
+    const anonymousOverviewExport = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/export`);
+    if (anonymousOverviewExport.status() !== 401) throw new Error("A exportação analítica aceitou uma consulta anônima.");
     const anonymousSync = await anonymousContext.request.get(`${baseUrl}/api/admin/sync`);
     if (anonymousSync.status() !== 401) throw new Error("O estado das sincronizações aceitou uma consulta anônima.");
     const anonymousSyncStart = await anonymousContext.request.post(`${baseUrl}/api/admin/sync`);
@@ -337,6 +339,8 @@ async function runAuditFlow(baseUrl) {
     if (analystOverviewBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a visão geral analítica.");
     const analystDetailsBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/details`);
     if (analystDetailsBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou o detalhamento analítico.");
+    const analystExportBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/export`);
+    if (analystExportBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária exportou dados analíticos.");
     const forbiddenSync = await analystContext.request.get(`${baseUrl}/api/admin/sync`);
     if (forbiddenSync.status() !== 403) throw new Error("Uma conta Analista consultou o estado das sincronizações.");
     const forbiddenSyncStart = await analystContext.request.post(`${baseUrl}/api/admin/sync`);
@@ -585,6 +589,33 @@ async function runAuditFlow(baseUrl) {
       }
       const invalidDetailsResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/details?pageSize=51`);
       if (invalidDetailsResponse.status() !== 400) throw new Error("O detalhamento aceitou paginação acima do limite seguro.");
+
+      const administratorExportResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/export?period=all`);
+      const administratorCsv = await administratorExportResponse.text();
+      if (
+        !administratorExportResponse.ok()
+        || !administratorExportResponse.headers()["content-type"]?.startsWith("text/csv")
+        || !administratorExportResponse.headers()["content-disposition"]?.includes("pulseti-visao-geral_")
+        || !administratorCsv.includes("Maria da Silva")
+        || !administratorCsv.includes("João Souza")
+      ) {
+        throw new Error("O Administrador não recebeu o CSV esperado da Visão geral.");
+      }
+      if (administratorCsv.includes("qa-ticket") || administratorCsv.includes("@example.invalid") || administratorCsv.includes("requesterEmail")) {
+        throw new Error("A exportação CSV expôs ID interno ou email do solicitante.");
+      }
+      const analystExportResponse = await analystContext.request.get(`${baseUrl}/api/analytics/overview/export?period=all`);
+      const analystCsv = await analystExportResponse.text();
+      if (
+        !analystExportResponse.ok()
+        || !analystCsv.includes("Solicitante protegido")
+        || analystCsv.includes("Maria da Silva")
+        || analystCsv.includes("João Souza")
+      ) {
+        throw new Error("A exportação CSV não mascarou solicitantes para a conta Analista.");
+      }
+      const invalidExportResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/export?period=invalid`);
+      if (invalidExportResponse.status() !== 400) throw new Error("A exportação aceitou filtros analíticos inválidos.");
     }
     await administratorPage.getByRole("button", { name: "Mapeamentos" }).click();
     await administratorPage.getByRole("heading", { name: "Mapeamentos do Notion" }).waitFor();
@@ -608,6 +639,8 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByText("Pré-validação do Notion concluída", { exact: true }).first().waitFor();
       await administratorPage.getByText("Sincronização do Notion concluída", { exact: true }).first().waitFor();
       await administratorPage.getByText("Execução interrompida encerrada", { exact: true }).first().waitFor();
+      await administratorPage.getByLabel("Categoria").selectOption("analytics");
+      await administratorPage.getByText("Visão geral exportada", { exact: true }).first().waitFor();
     }
 
     await administratorPage.getByLabel("Categoria").selectOption("auth");
@@ -625,6 +658,12 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByText("Evolução da demanda", { exact: true }).waitFor();
       await administratorPage.getByText("Distribuição por status", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
+      const downloadPromise = administratorPage.waitForEvent("download");
+      await administratorPage.getByRole("button", { name: "Exportar CSV", exact: true }).click();
+      const downloadedCsv = await downloadPromise;
+      if (!downloadedCsv.suggestedFilename().startsWith("pulseti-visao-geral_")) {
+        throw new Error("O botão da Visão geral não iniciou o download CSV esperado.");
+      }
       const compactDonut = await assertDonutCenterFits(administratorPage);
       const donutWrap = administratorPage.locator(".donut-wrap");
       const originalDonutStyle = await donutWrap.getAttribute("style");
@@ -747,7 +786,7 @@ async function runAuditFlow(baseUrl) {
       }
     }
 
-    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral real, detalhamento protegido, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral real, detalhamento protegido, exportação CSV, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await analystContext.close();

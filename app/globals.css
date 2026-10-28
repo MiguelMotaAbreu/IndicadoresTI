@@ -444,6 +444,8 @@ td:first-child small { color: var(--ink-faint); font-size: 8px; }
 .priority-tag--muito-alta { background: #fbece5; color: #b4513b; }
 .priority-tag--alta { background: var(--amber-soft); color: #94631a; }
 .details-drawer > footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); padding: 13px 24px; }
+.drawer-export-action { display: grid; gap: 4px; }
+.drawer-export-action small { max-width: 250px; color: var(--red); font-size: 8px; line-height: 1.35; }
 .drawer-pagination { display: flex; gap: 6px; margin-left: auto; }
 .toast { position: fixed; top: 90px; left: 50%; z-index: 140; display: flex; align-items: center; gap: 8px; border-radius: 11px; background: var(--green-900); color: white; box-shadow: var(--shadow-md); padding: 12px 15px; font-size: 10px; pointer-events: none; transform: translateX(-50%); animation: toast-in 220ms ease-out; }
 

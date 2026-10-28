@@ -245,6 +245,28 @@ async function loadOverviewDetails(
   return payload.data ?? null;
 }
 
+async function downloadOverviewCsv(filters: Filters, crossFilter: OverviewCrossFilter | null): Promise<string> {
+  const searchParams = createOverviewSearchParams(filters, crossFilter);
+  const response = await fetch(`/api/analytics/overview/export?${searchParams}`, { cache: "no-store" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Não foi possível exportar o recorte atual.");
+  }
+
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "pulseti-visao-geral.csv";
+  const objectUrl = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.style.display = "none";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+  return filename;
+}
+
 function formatMetricNumber(value: number | null, maximumFractionDigits = 2): string {
   return value === null ? "—" : value.toLocaleString("pt-BR", { maximumFractionDigits });
 }
@@ -953,6 +975,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   const [builderWidgetId, setBuilderWidgetId] = useState<string | null>(null);
   const [activePageId, setActivePageId] = useState("page-1");
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [crossFilter, setCrossFilter] = useState<string | null>(null);
   const [overviewCrossFilter, setOverviewCrossFilter] = useState<OverviewCrossFilter | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -1179,6 +1202,19 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     setDetailsOpen(false);
   }
 
+  async function exportOverviewCsv() {
+    if (dashboardKey !== "overview" || overviewState.status !== "ready" || exporting) return;
+    setExporting(true);
+    try {
+      await downloadOverviewCsv(filters, overviewCrossFilter);
+      flash("CSV exportado com o recorte e as proteções atuais");
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Não foi possível exportar o painel");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function saveDraft() {
     if (draftPersistenceStatus === "saving") return;
     try {
@@ -1324,7 +1360,12 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
             {draftPersistenceStatus === "error" ? <WarningCircleIcon size={15} weight="fill" /> : persistenceBusy ? <ArrowsClockwiseIcon className="spin" size={15} /> : <CloudCheckIcon size={15} weight="fill" />}
             {draftPersistenceStatus === "loading" ? "Carregando painel" : draftPersistenceStatus === "saving" ? "Salvando" : draftPersistenceStatus === "error" ? "Servidor indisponível" : "Painel sincronizado"}
           </span>
-          <button className="button button--ghost" disabled={dashboardKey === "overview"} title={dashboardKey === "overview" ? "A exportação será habilitada quando o gerador real de arquivos estiver conectado." : undefined} onClick={() => flash("Exportação preparada com os filtros atuais")}><DownloadSimpleIcon size={17} /> Exportar</button>
+          <button
+            className="button button--ghost"
+            disabled={dashboardKey !== "overview" || overviewState.status !== "ready" || exporting}
+            title={dashboardKey !== "overview" ? "A exportação será conectada quando este painel usar o snapshot real." : overviewState.status !== "ready" ? "Aguarde o snapshot real ser carregado." : "Exportar o recorte atual em CSV"}
+            onClick={() => void exportOverviewCsv()}
+          ><DownloadSimpleIcon size={17} /> {exporting ? "Exportando..." : "Exportar CSV"}</button>
           {editing ? (
             <>
               <button className="button button--ghost" disabled={persistenceBusy} onClick={restoreInitialLayout}>Restaurar</button>
@@ -1692,6 +1733,8 @@ function formatDetailDateTime(value: string | null): string {
 function OverviewDetailsDrawer({ filters, crossFilter, onClose }: { filters: Filters; crossFilter: OverviewCrossFilter | null; onClose: () => void }) {
   const [page, setPage] = useState(1);
   const [reload, setReload] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [state, setState] = useState<OverviewDetailsLoadState>({
     status: "loading",
     data: null,
@@ -1719,6 +1762,19 @@ function OverviewDetailsDrawer({ filters, crossFilter, onClose }: { filters: Fil
   const selectionLabel = crossFilter
     ? `${overviewCrossFilterLabels[crossFilter.field]} cruzado: ${crossFilter.value}`
     : "Filtros atuais da Visão geral";
+
+  async function exportCsv() {
+    if (exporting || state.status !== "ready") return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      await downloadOverviewCsv(filters, crossFilter);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Não foi possível exportar o recorte atual.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className="drawer-layer" onMouseDown={onClose}>
@@ -1748,7 +1804,10 @@ function OverviewDetailsDrawer({ filters, crossFilter, onClose }: { filters: Fil
           </div>
         )}
         <footer>
-          <button className="button button--ghost" disabled title="A exportação segura será implementada em uma fatia própria."><DownloadSimpleIcon size={16} />Exportar CSV</button>
+          <div className="drawer-export-action">
+            <button className="button button--ghost" disabled={state.status !== "ready" || exporting} onClick={() => void exportCsv()}><DownloadSimpleIcon size={16} />{exporting ? "Exportando..." : "Exportar CSV"}</button>
+            {exportError && <small role="alert">{exportError}</small>}
+          </div>
           <div className="drawer-pagination">
             <button className="button button--ghost" disabled={!data || data.selection.page <= 1 || state.status === "loading"} onClick={() => { setState({ status: "loading", data: null, message: "Consultando os chamados do recorte." }); setPage((value) => Math.max(1, value - 1)); }}>Anterior</button>
             <button className="button button--ghost" disabled={!data || data.selection.page >= data.selection.pageCount || state.status === "loading"} onClick={() => { setState({ status: "loading", data: null, message: "Consultando os chamados do recorte." }); setPage((value) => value + 1); }}>Próxima</button>
@@ -1773,7 +1832,7 @@ function DetailsDrawer({ crossFilter, onClose }: { crossFilter: string | null; o
             <tbody>{ticketRows.map((row) => <tr key={row.id}><td><strong>{row.id}</strong><small>{row.reason}</small></td><td>{row.requester}</td><td>{row.sector}</td><td><span className={cn("priority-tag", `priority-tag--${row.priority.toLowerCase().replace(" ", "-")}`)}>{row.priority}</span></td><td>{row.status}</td></tr>)}</tbody>
           </table>
         </div>
-        <footer><button className="button button--ghost"><DownloadSimpleIcon size={16} />Exportar CSV mascarado</button><button className="button button--primary" onClick={onClose}>Fechar</button></footer>
+        <footer><button className="button button--ghost" disabled title="Disponível quando este painel usar o snapshot real."><DownloadSimpleIcon size={16} />Exportar CSV mascarado</button><button className="button button--primary" onClick={onClose}>Fechar</button></footer>
       </aside>
     </div>
   );

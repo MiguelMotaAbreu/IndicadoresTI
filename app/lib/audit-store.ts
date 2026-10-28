@@ -15,7 +15,8 @@ export type AuditAction =
   | "sync.mapping_saved"
   | "sync.preflight_completed"
   | "sync.run_completed"
-  | "sync.run_recovered";
+  | "sync.run_recovered"
+  | "analytics.overview_exported";
 
 export type AuditOutcome = "success" | "failure";
 
@@ -28,7 +29,7 @@ export type AuditActor = {
 export type AppendAuditEventInput = {
   actor: AuditActor | null;
   action: AuditAction;
-  targetType: "account" | "session" | "integration";
+  targetType: "account" | "session" | "integration" | "snapshot";
   targetId?: string | null;
   targetLabel?: string | null;
   outcome: AuditOutcome;
@@ -40,7 +41,7 @@ export type AuditEvent = {
   occurredAt: string;
   actor: AuditActor | null;
   action: AuditAction;
-  targetType: "account" | "session" | "integration";
+  targetType: "account" | "session" | "integration" | "snapshot";
   targetId: string | null;
   targetLabel: string | null;
   outcome: AuditOutcome;
@@ -54,7 +55,7 @@ type AuditEventRow = {
   actor_name: string | null;
   actor_role: UserRole | null;
   action: AuditAction;
-  target_type: "account" | "session" | "integration";
+  target_type: "account" | "session" | "integration" | "snapshot";
   target_id: string | null;
   target_label: string | null;
   outcome: AuditOutcome;
