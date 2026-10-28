@@ -1,4 +1,5 @@
 import type { OverviewAnalyticsFilters, OverviewPeriod } from "./overview-analytics.ts";
+import type { AnalyticalDetailScope } from "./overview-details.ts";
 
 const filterKeys = ["period", "sector", "priority", "status", "reason"] as const;
 
@@ -39,9 +40,22 @@ export function parseOverviewDetailsQuery(searchParams: URLSearchParams): {
   filters: OverviewAnalyticsFilters;
   page: number;
   pageSize: number;
+  scope: AnalyticalDetailScope;
 } | null {
-  const filters = parseOverviewFilters(searchParams, ["page", "pageSize"]);
+  const filters = parseOverviewFilters(searchParams, ["page", "pageSize", "scope"]);
   const page = parsePositiveInteger(searchParams.get("page"), 1, 100_000);
   const pageSize = parsePositiveInteger(searchParams.get("pageSize"), 20, 50);
-  return filters && page && pageSize ? { filters, page, pageSize } : null;
+  const scope = searchParams.get("scope") ?? "all";
+  const allowedScopes = new Set<AnalyticalDetailScope>([
+    "all",
+    "pending",
+    "pending-valid-age",
+    "pending-supplier",
+    "pending-unassigned",
+    "sla-evaluated",
+    "sla-first-response",
+  ]);
+  return filters && page && pageSize && allowedScopes.has(scope as AnalyticalDetailScope)
+    ? { filters, page, pageSize, scope: scope as AnalyticalDetailScope }
+    : null;
 }

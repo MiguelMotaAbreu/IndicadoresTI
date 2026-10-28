@@ -74,11 +74,8 @@ import {
   indicators,
   movementTimeline,
   movementTypeData,
-  responseHistogram,
-  slaByPriority,
   stageCompositionData,
   ticketRows,
-  timeComparisonData,
   type DataField,
   type DashboardKey,
 } from "./mock-data";
@@ -112,6 +109,8 @@ import { createBoundedDashboardCompactor, dashboardLayoutFitsBounds, magnetizeDa
 import type { DemandAnalytics } from "./lib/demand-analytics";
 import type { OverviewAnalytics } from "./lib/overview-analytics";
 import type { PendingAnalytics } from "./lib/pending-analytics";
+import type { SlaAnalytics } from "./lib/sla-analytics";
+import type { AnalyticalDetailScope } from "./lib/overview-details";
 import type { UserRole } from "./lib/user-store";
 
 type View = "catalog" | "dashboard" | "admin";
@@ -184,6 +183,11 @@ type PendingLoadState =
   | { status: "ready"; data: PendingAnalytics; message: string }
   | { status: "empty" | "error"; data: null; message: string };
 
+type SlaLoadState =
+  | { status: "loading"; data: null; message: string }
+  | { status: "ready"; data: SlaAnalytics; message: string }
+  | { status: "empty" | "error"; data: null; message: string };
+
 type OverviewDetailRow = {
   rowKey: string;
   code: string;
@@ -193,6 +197,8 @@ type OverviewDetailRow = {
   status: string;
   reason: string;
   openedAt: string | null;
+  startedAt: string | null;
+  slaStatus: string;
 };
 
 type OverviewDetails = {
@@ -202,6 +208,7 @@ type OverviewDetails = {
     page: number;
     pageSize: number;
     pageCount: number;
+    scope: AnalyticalDetailScope;
   };
   privacy: { requesterMasked: boolean };
   rows: OverviewDetailRow[];
@@ -211,6 +218,12 @@ type OverviewDetailsLoadState =
   | { status: "loading"; data: null; message: string }
   | { status: "ready"; data: OverviewDetails; message: string }
   | { status: "empty" | "error"; data: null; message: string };
+
+type AnalyticalDetailsContext = {
+  scope: AnalyticalDetailScope;
+  title: string;
+  description: string;
+};
 
 function createOverviewSearchParams(filters: Filters, crossFilter: OverviewCrossFilter | null): URLSearchParams {
   const searchParams = new URLSearchParams();
@@ -254,15 +267,27 @@ async function loadPendingAnalytics(filters: Filters, crossFilter: OverviewCross
   return payload.data ?? null;
 }
 
+async function loadSlaAnalytics(filters: Filters, crossFilter: OverviewCrossFilter | null, signal?: AbortSignal): Promise<SlaAnalytics | null> {
+  const searchParams = createOverviewSearchParams(filters, crossFilter);
+  const response = await fetch(`/api/analytics/sla?${searchParams}`, { cache: "no-store", signal });
+  const payload = await response.json().catch(() => null) as { ok?: boolean; data?: SlaAnalytics | null; error?: string } | null;
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error ?? "Não foi possível carregar tempos e SLA.");
+  }
+  return payload.data ?? null;
+}
+
 async function loadOverviewDetails(
   filters: Filters,
   crossFilter: OverviewCrossFilter | null,
   page: number,
+  scope: AnalyticalDetailScope,
   signal?: AbortSignal,
 ): Promise<OverviewDetails | null> {
   const searchParams = createOverviewSearchParams(filters, crossFilter);
   searchParams.set("page", String(page));
   searchParams.set("pageSize", "20");
+  searchParams.set("scope", scope);
   const response = await fetch(`/api/analytics/overview/details?${searchParams}`, { cache: "no-store", signal });
   const payload = await response.json().catch(() => null) as { ok?: boolean; data?: OverviewDetails | null; error?: string } | null;
   if (!response.ok || !payload?.ok) {
@@ -304,6 +329,17 @@ function formatAgeHours(value: number | null): string {
   const hours = rounded % 24;
   if (days === 0) return `${hours}h`;
   return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
+}
+
+function formatDurationMinutes(value: number | null): string {
+  if (value === null) return "—";
+  const totalMinutes = Math.max(0, Math.round(value));
+  const days = Math.floor(totalMinutes / 1_440);
+  const hours = Math.floor((totalMinutes % 1_440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${String(minutes).padStart(2, "0")}` : `${hours}h`;
+  return `${minutes} min`;
 }
 
 function formatAnalyticsDate(value: string): string {
@@ -388,6 +424,26 @@ function pendingMetrics(state: PendingLoadState): MetricDefinition[] {
     { id: "metric-age", value: formatAgeHours(cards.medianAgeHours.value), title: "Idade mediana", delta: `N = ${cards.medianAgeHours.validOpenings} aberturas válidas` },
     { id: "metric-supplier", value: formatMetricNumber(cards.withSupplier.value, 0), title: "Com fornecedor", delta: `${formatMetricNumber(cards.withSupplier.percentage)}% da fila` },
     { id: "metric-owner", value: formatMetricNumber(cards.withoutAssignee.value, 0), title: "Sem responsável", delta: `${formatMetricNumber(cards.withoutAssignee.coveragePercent)}% avaliados`, tone: cards.withoutAssignee.value > 0 ? "warning" : "default" },
+  ];
+}
+
+function slaMetrics(state: SlaLoadState): MetricDefinition[] {
+  if (state.status !== "ready") {
+    const value = state.status === "loading" ? "…" : "—";
+    return [
+      { id: "metric-evaluated", value, title: "Chamados avaliados", delta: state.message, tone: "primary" },
+      { id: "metric-median", value, title: "Mediana até início", delta: state.message },
+      { id: "metric-p90", value, title: "P90 até início", delta: state.message },
+      { id: "metric-coverage", value, title: "Cobertura do SLA", delta: state.message, tone: "warning" },
+    ];
+  }
+
+  const { cards } = state.data;
+  return [
+    { id: "metric-evaluated", value: formatMetricNumber(cards.evaluated.value, 0), title: "Chamados avaliados", delta: `${formatMetricNumber(cards.evaluated.coveragePercent)}% do recorte`, tone: "primary" },
+    { id: "metric-median", value: formatDurationMinutes(cards.firstResponse.medianMinutes), title: "Mediana até início", delta: `N = ${cards.firstResponse.validIntervals} intervalos válidos` },
+    { id: "metric-p90", value: formatDurationMinutes(cards.firstResponse.p90Minutes), title: "P90 até início", delta: cards.firstResponse.validIntervals < 5 ? "Amostra mínima: 5 registros" : "90% da amostra até este tempo" },
+    { id: "metric-coverage", value: `${formatMetricNumber(cards.evaluated.coveragePercent)}%`, title: "Cobertura do SLA", delta: cards.evaluated.coveragePercent >= 80 ? "Dentro do limiar de 80%" : "Abaixo do limiar de 80%", tone: cards.evaluated.coveragePercent >= 80 ? "default" : "warning" },
   ];
 }
 
@@ -579,7 +635,7 @@ function Catalog({ onOpen }: { onOpen: (key: DashboardKey) => void }) {
         <div>
           <span className="catalog-hero__badge"><TrendUpIcon size={15} /> Resumo da base</span>
           <h2>Uma visão confiável da operação, sem ruído.</h2>
-          <p>Visão geral, Demanda e Pendências usam o último snapshot íntegro do Notion; os demais painéis identificam dados demonstrativos enquanto são conectados.</p>
+          <p>Visão geral, Demanda, Pendências e Tempos/SLA usam o último snapshot íntegro do Notion; os demais painéis identificam dados demonstrativos enquanto são conectados.</p>
         </div>
         <div className="catalog-hero__numbers">
           <span><strong>47</strong><small>indicadores</small></span>
@@ -657,7 +713,38 @@ function DonutCenterLabel({ viewBox, value, caption }: { viewBox?: LabelProps["v
   );
 }
 
-function AnalyticalWidgetState({ state }: { state: OverviewLoadState | DemandLoadState | PendingLoadState }) {
+function AnalyticalDonutChart({ data, value, caption, height, onSegmentClick }: {
+  data: Array<{ name: string; value: number; color: string }>;
+  value: string;
+  caption: string;
+  height: `${number}%`;
+  onSegmentClick?: (name: string) => void;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <PieChart className="analytical-donut">
+        <Pie
+          isAnimationActive={false}
+          data={data}
+          dataKey="value"
+          nameKey="name"
+          innerRadius="64%"
+          outerRadius="88%"
+          paddingAngle={2}
+          stroke="none"
+          cursor={onSegmentClick ? "pointer" : undefined}
+          onClick={(item) => onSegmentClick?.(String(item.name ?? "Sem classificação"))}
+        >
+          {data.map((item) => <Cell key={item.name} fill={item.color} />)}
+          <Label content={(props) => <DonutCenterLabel viewBox={props.viewBox} value={value} caption={caption} />} />
+        </Pie>
+        <Tooltip content={<CustomTooltip />} />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+function AnalyticalWidgetState({ state }: { state: OverviewLoadState | DemandLoadState | PendingLoadState | SlaLoadState }) {
   return (
     <div className={`analytical-widget-state analytical-widget-state--${state.status}`}>
       {state.status === "loading" ? <ArrowsClockwiseIcon className="spin" size={24} /> : <DatabaseIcon size={24} />}
@@ -683,7 +770,8 @@ function renderDashboardWidgets(
   overviewState: OverviewLoadState,
   demandState: DemandLoadState,
   pendingState: PendingLoadState,
-  onOpenOverviewDetails: () => void,
+  slaState: SlaLoadState,
+  onOpenDetails: (scope?: AnalyticalDetailScope, title?: string, description?: string) => void,
 ) {
   const chartGrid = <CartesianGrid stroke="#edf0ed" vertical={false} />;
 
@@ -717,7 +805,7 @@ function renderDashboardWidgets(
     const completedPercentLabel = `${formatMetricNumber(completedPercent)}%`;
     return [
       <div key="overview-demand">
-        <WidgetFrame title="Evolução da demanda" subtitle={`Aberturas e conclusões · por ${analytics.demand.granularity === "day" ? "dia" : "mês"}`} editing={editing} onDetails={onOpenOverviewDetails} action={<span className="coverage-badge">Cobertura {formatMetricNumber(analytics.cards.averagePerCalendarDay.coveragePercent)}%</span>}>
+        <WidgetFrame title="Evolução da demanda" subtitle={`Aberturas e conclusões · por ${analytics.demand.granularity === "day" ? "dia" : "mês"}`} editing={editing} onDetails={() => onOpenDetails()} action={<span className="coverage-badge">Cobertura {formatMetricNumber(analytics.cards.averagePerCalendarDay.coveragePercent)}%</span>}>
           {hasMatchingTickets && liveDemand.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={liveDemand} margin={{ top: 10, right: 6, left: -24, bottom: 0 }}>
               {chartGrid}
@@ -731,23 +819,15 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="overview-status">
-        <WidgetFrame title="Distribuição por status" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.status.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={onOpenOverviewDetails}>
+        <WidgetFrame title="Distribuição por status" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.status.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={() => onOpenDetails()}>
           {liveStatus.length > 0 ? <div className="donut-wrap">
-            <ResponsiveContainer width="100%" height="55%">
-              <PieChart>
-                <Pie isAnimationActive={false} data={liveStatus} dataKey="value" nameKey="name" innerRadius="64%" outerRadius="88%" paddingAngle={2} stroke="none" cursor="pointer" onClick={(data) => onOverviewCrossFilter("status", data.name ?? "Sem classificação")}>
-                  {liveStatus.map((item) => <Cell key={item.name} fill={item.color} />)}
-                  <Label content={(props) => <DonutCenterLabel viewBox={props.viewBox} value={completedPercentLabel} caption="concluídos" />} />
-                </Pie>
-                <Tooltip content={<CustomTooltip />} />
-              </PieChart>
-            </ResponsiveContainer>
+            <AnalyticalDonutChart data={liveStatus} value={completedPercentLabel} caption="concluídos" height="55%" onSegmentClick={(name) => onOverviewCrossFilter("status", name)} />
             <div className="legend-list">{liveStatus.map((item) => <button key={item.name} onClick={() => onOverviewCrossFilter("status", item.name)}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.value}</b></button>)}</div>
           </div> : <AnalyticalEmptyResult message={hasMatchingTickets ? "Nenhum status válido foi encontrado no recorte." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="overview-reason">
-        <WidgetFrame title="Chamados por motivo" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.reason.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={onOpenOverviewDetails}>
+        <WidgetFrame title="Chamados por motivo" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.reason.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={() => onOpenDetails()}>
           {liveReasons.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={liveReasons} layout="vertical" margin={{ top: 4, right: 22, left: 2, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ed" horizontal={false} />
@@ -760,7 +840,7 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="overview-priority">
-        <WidgetFrame title="Distribuição por prioridade" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.priority.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={onOpenOverviewDetails} action={<span className="sample-badge">N = {analytics.cards.totalTickets}</span>}>
+        <WidgetFrame title="Distribuição por prioridade" subtitle={`Cobertura ${formatMetricNumber(analytics.distributions.priority.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={() => onOpenDetails()} action={<span className="sample-badge">N = {analytics.cards.totalTickets}</span>}>
           {livePriority.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={livePriority} margin={{ top: 8, right: 26, left: -24, bottom: 0 }}>
               {chartGrid}
@@ -804,7 +884,7 @@ function renderDashboardWidgets(
 
     return [
       <div key="demand-trend">
-        <WidgetFrame title="Evolução e sazonalidade" subtitle={`Aberturas e conclusões · por ${analytics.trend.granularity === "day" ? "dia" : "mês"}`} editing={editing} onDetails={onOpenOverviewDetails} action={<span className="coverage-badge">Cobertura {formatMetricNumber(analytics.cards.averagePerCalendarDay.coveragePercent)}%</span>}>
+        <WidgetFrame title="Evolução e sazonalidade" subtitle={`Aberturas e conclusões · por ${analytics.trend.granularity === "day" ? "dia" : "mês"}`} editing={editing} onDetails={() => onOpenDetails()} action={<span className="coverage-badge">Cobertura {formatMetricNumber(analytics.cards.averagePerCalendarDay.coveragePercent)}%</span>}>
           {hasMatchingTickets && liveDemand.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={liveDemand} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
               {chartGrid}
@@ -818,7 +898,7 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="demand-heatmap">
-        <WidgetFrame title="Demanda por dia e horário" subtitle={`Cobertura ${formatMetricNumber(analytics.heatmap.coveragePercent)}% · faixas de 3 horas`} editing={editing} onDetails={onOpenOverviewDetails}>
+        <WidgetFrame title="Demanda por dia e horário" subtitle={`Cobertura ${formatMetricNumber(analytics.heatmap.coveragePercent)}% · faixas de 3 horas`} editing={editing} onDetails={() => onOpenDetails()}>
           {analytics.heatmap.validOpenings > 0 ? <div className="heatmap-chart">
             <div className="heatmap-axis"><span /><span>00h</span><span>03h</span><span>06h</span><span>09h</span><span>12h</span><span>15h</span><span>18h</span><span>21h</span></div>
             {analytics.heatmap.rows.map((row) => <div className="heatmap-row" key={row.day}><span>{row.day}</span>{row.buckets.map((value, columnIndex) => <button key={columnIndex} disabled aria-label={`${value} chamados em ${row.day}, entre ${columnIndex * 3}h e ${columnIndex * 3 + 3}h`} title="Cruzamento por faixa horária será habilitado quando essa dimensão fizer parte do contrato de filtros." style={{ backgroundColor: `rgba(23, 111, 76, ${0.08 + (value / heatmapMaximum) * 0.82})` }}>{value || ""}</button>)}</div>)}
@@ -827,7 +907,7 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="demand-reasons">
-        <WidgetFrame title="Chamados por motivo" subtitle={`Cobertura ${formatMetricNumber(analytics.reasons.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={onOpenOverviewDetails}>
+        <WidgetFrame title="Chamados por motivo" subtitle={`Cobertura ${formatMetricNumber(analytics.reasons.coveragePercent)}% · clique para cruzar`} editing={editing} onDetails={() => onOpenDetails()}>
           {liveReasons.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={liveReasons} layout="vertical" margin={{ top: 4, right: 22, left: 4, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ed" horizontal={false} />
@@ -840,7 +920,7 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="demand-pareto">
-        <WidgetFrame title="Pareto dos motivos" subtitle="Volume e participação acumulada" editing={editing} onDetails={onOpenOverviewDetails} action={<span className="sample-badge">N = {analytics.pareto.totalOccurrences}</span>}>
+        <WidgetFrame title="Pareto dos motivos" subtitle="Volume e participação acumulada" editing={editing} onDetails={() => onOpenDetails()} action={<span className="sample-badge">N = {analytics.pareto.totalOccurrences}</span>}>
           {livePareto.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={livePareto} margin={{ top: 8, right: 12, left: -24, bottom: 0 }}>
               {chartGrid}
@@ -870,7 +950,7 @@ function renderDashboardWidgets(
     const composition = analytics.composition.items.map((item) => ({ name: item.sector, ...item.values }));
     return [
       <div key="pending-age">
-        <WidgetFrame title="Idade das pendências" subtitle={`Cobertura ${formatMetricNumber(analytics.age.coveragePercent)}% · referência na publicação`} editing={editing} detailsEnabled={false} action={<span className="sample-badge">N = {analytics.age.validOpenings}</span>}>
+        <WidgetFrame title="Idade das pendências" subtitle={`Cobertura ${formatMetricNumber(analytics.age.coveragePercent)}% · referência na publicação`} editing={editing} onDetails={() => onOpenDetails("pending-valid-age", "Pendências com idade calculável", "Chamados pendentes com data de abertura válida que sustentam as faixas de idade.")} action={<span className="sample-badge">N = {analytics.age.validOpenings}</span>}>
           {analytics.age.validOpenings > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={analytics.age.buckets} margin={{ top: 8, right: 12, left: -24, bottom: 0 }}>
               {chartGrid}
@@ -883,12 +963,12 @@ function renderDashboardWidgets(
         </WidgetFrame>
       </div>,
       <div key="pending-oldest">
-        <WidgetFrame title="Pendências mais antigas" subtitle="Até cinco registros com abertura válida" editing={editing} detailsEnabled={false}>
+        <WidgetFrame title="Pendências mais antigas" subtitle="Até cinco registros com abertura válida" editing={editing} onDetails={() => onOpenDetails("pending-valid-age", "Pendências ordenadas por idade", "Fila pendente com abertura válida, ordenada da mais antiga para a mais recente.")}>
           {analytics.oldest.length > 0 ? <div className="ranked-list">{analytics.oldest.map((item, index) => <div className="ranked-list__item" key={item.rowKey}><span className="ranked-list__index">{index + 1}</span><span><strong>{item.code} · {item.reason}</strong><small>{item.sector} · {item.priority}</small></span><b>{formatAgeHours(item.ageHours)}</b></div>)}</div> : <AnalyticalEmptyResult message={analytics.selection.pendingTickets > 0 ? "As pendências não possuem abertura válida para ordenação." : "Nenhuma pendência corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="pending-composition">
-        <WidgetFrame title="Composição das pendências" subtitle={`Setor × prioridade · cobertura ${formatMetricNumber(analytics.composition.coveragePercent)}%`} editing={editing} detailsEnabled={false}>
+        <WidgetFrame title="Composição das pendências" subtitle={`Setor × prioridade · cobertura ${formatMetricNumber(analytics.composition.coveragePercent)}%`} editing={editing} onDetails={() => onOpenDetails("pending", "Chamados da fila pendente", "Chamados classificados como não iniciados, aguardando informação ou com fornecedor.")}>
           {composition.length > 0 && analytics.composition.priorities.length > 0 ? <ResponsiveContainer width="100%" height="100%">
             <BarChart data={composition} layout="vertical" margin={{ top: 4, right: 18, left: 6, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ed" horizontal={false} />
@@ -904,25 +984,40 @@ function renderDashboardWidgets(
   }
 
   if (dashboardKey === "sla") {
-    const coveragePie = [{ name: "Avaliado", value: 43.6, color: "#176f4c" }, { name: "Não avaliado", value: 56.4, color: "#e5ebe7" }];
+    if (slaState.status !== "ready") {
+      return [
+        <div key="sla-histogram"><WidgetFrame title="Tempo até o primeiro atendimento" subtitle="Distribuição dos intervalos válidos" editing={editing} detailsEnabled={false}><AnalyticalWidgetState state={slaState} /></WidgetFrame></div>,
+        <div key="sla-compliance"><WidgetFrame title="Cumprimento por prioridade" subtitle="Dentro e fora do SLA registrado" editing={editing} detailsEnabled={false}><AnalyticalWidgetState state={slaState} /></WidgetFrame></div>,
+        <div key="sla-comparison"><WidgetFrame title="Tempos por prioridade" subtitle="Mediana e P90 em minutos corridos" editing={editing} detailsEnabled={false}><AnalyticalWidgetState state={slaState} /></WidgetFrame></div>,
+        <div key="sla-coverage"><WidgetFrame title="Cobertura da avaliação" subtitle="Quanto do recorte sustenta o SLA" editing={editing} detailsEnabled={false}><AnalyticalWidgetState state={slaState} /></WidgetFrame></div>,
+      ];
+    }
+    const analytics = slaState.data;
+    const coveragePercent = analytics.cards.evaluated.coveragePercent;
+    const coveragePie = [
+      { name: "Avaliado", value: analytics.cards.evaluated.value, color: "#176f4c" },
+      { name: "Não avaliado", value: Math.max(0, analytics.selection.matchedTickets - analytics.cards.evaluated.value), color: "#e5ebe7" },
+    ];
+    const compliance = analytics.complianceByPriority.items.map((item) => ({ name: item.name, dentro: item.within, fora: item.outside }));
+    const timeComparison = analytics.timesByPriority.items.map((item) => ({ name: item.name, mediana: item.medianMinutes, p90: item.p90Minutes, amostra: item.samples }));
     return [
       <div key="sla-histogram">
-        <WidgetFrame title="Tempo até o primeiro atendimento" subtitle="Distribuição dos 280 registros válidos" editing={editing} action={<span className="coverage-badge">Mediana 38 min</span>}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={responseHistogram} margin={{ top: 8, right: 12, left: -24, bottom: 0 }}>
+        <WidgetFrame title="Tempo até o primeiro atendimento" subtitle={`Cobertura ${formatMetricNumber(analytics.histogram.coveragePercent)}% · minutos corridos`} editing={editing} onDetails={() => onOpenDetails("sla-first-response", "Chamados com tempo de resposta válido", "Registros com abertura e início válidos, em ordem cronológica, que sustentam o histograma.")} action={<span className="coverage-badge">Mediana {formatDurationMinutes(analytics.cards.firstResponse.medianMinutes)}</span>}>
+          {analytics.histogram.validIntervals > 0 ? <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={analytics.histogram.buckets} margin={{ top: 8, right: 12, left: -24, bottom: 0 }}>
               {chartGrid}
               <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#747d77" }} />
               <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#8c958f" }} />
               <Tooltip content={<CustomTooltip />} />
               <Bar isAnimationActive={false} dataKey="value" name="Chamados" fill="#6968a6" radius={[5, 5, 0, 0]} maxBarSize={44} />
             </BarChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer> : <AnalyticalEmptyResult message={analytics.selection.matchedTickets > 0 ? "Nenhum intervalo válido entre abertura e início foi encontrado." : "Nenhum chamado corresponde aos filtros aplicados."} />}
         </WidgetFrame>
       </div>,
       <div key="sla-compliance">
-        <WidgetFrame title="Cumprimento por prioridade" subtitle="Dentro e fora do SLA registrado" editing={editing}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={slaByPriority} layout="vertical" margin={{ top: 4, right: 14, left: 8, bottom: 0 }}>
+        <WidgetFrame title="Cumprimento por prioridade" subtitle={`Cobertura conjunta ${formatMetricNumber(analytics.complianceByPriority.coveragePercent)}%`} editing={editing} onDetails={() => onOpenDetails("sla-evaluated", "Chamados avaliados pelo SLA", "Registros classificados como dentro ou fora do prazo que sustentam o cumprimento por prioridade.")}>
+          {compliance.length > 0 ? <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={compliance} layout="vertical" margin={{ top: 4, right: 14, left: 8, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ed" horizontal={false} />
               <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#8c958f" }} />
               <YAxis type="category" dataKey="name" width={76} tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#606963" }} />
@@ -930,13 +1025,13 @@ function renderDashboardWidgets(
               <Bar isAnimationActive={false} dataKey="dentro" name="Dentro" stackId="sla" fill="#2f8a61" maxBarSize={22} />
               <Bar isAnimationActive={false} dataKey="fora" name="Fora" stackId="sla" fill="#c85d62" radius={[0, 5, 5, 0]} maxBarSize={22} />
             </BarChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer> : <AnalyticalEmptyResult message={analytics.cards.evaluated.value > 0 ? "As avaliações de SLA não possuem prioridade válida para comparação." : "Nenhuma classificação dentro ou fora do prazo foi encontrada."} />}
         </WidgetFrame>
       </div>,
       <div key="sla-comparison">
-        <WidgetFrame title="Tempos por prioridade" subtitle="Mediana e P90 · minutos corridos" editing={editing} action={<span className="sample-badge">N mínimo 20</span>}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={timeComparisonData} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
+        <WidgetFrame title="Tempos por prioridade" subtitle={`Mediana e P90 · cobertura ${formatMetricNumber(analytics.timesByPriority.coveragePercent)}%`} editing={editing} onDetails={() => onOpenDetails("sla-first-response", "Tempos válidos por prioridade", "Registros com intervalo válido entre abertura e primeiro atendimento.")} action={<span className="sample-badge">P90 exige N ≥ 5</span>}>
+          {timeComparison.length > 0 ? <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={timeComparison} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
               {chartGrid}
               <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#747d77" }} />
               <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "#8c958f" }} />
@@ -944,18 +1039,15 @@ function renderDashboardWidgets(
               <Bar isAnimationActive={false} dataKey="mediana" name="Mediana" fill="#8d8cc1" radius={[5, 5, 0, 0]} maxBarSize={34} />
               <Line isAnimationActive={false} type="monotone" dataKey="p90" name="P90" stroke="#4d4c8c" strokeWidth={2.5} dot={{ r: 3, fill: "#4d4c8c" }} />
             </ComposedChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer> : <AnalyticalEmptyResult message={analytics.histogram.validIntervals > 0 ? "Os intervalos válidos não possuem prioridade registrada." : "Nenhum intervalo válido está disponível para comparação."} />}
         </WidgetFrame>
       </div>,
       <div key="sla-coverage">
-        <WidgetFrame title="Cobertura da avaliação" subtitle="Quanto da base sustenta o SLA" editing={editing}>
-          <div className="coverage-donut">
-            <ResponsiveContainer width="100%" height="72%">
-              <PieChart><Pie isAnimationActive={false} data={coveragePie} dataKey="value" innerRadius="62%" outerRadius="88%" paddingAngle={2} stroke="none">{coveragePie.map((item) => <Cell key={item.name} fill={item.color} />)}</Pie><Tooltip content={<CustomTooltip />} /></PieChart>
-            </ResponsiveContainer>
-            <div className="coverage-donut__center"><strong>43,6%</strong><span>avaliado</span></div>
-            <p><WarningCircleIcon size={14} weight="fill" />Abaixo do limiar recomendado de 80%</p>
-          </div>
+        <WidgetFrame title="Cobertura da avaliação" subtitle="Classificados dentro ou fora do prazo" editing={editing} onDetails={() => onOpenDetails("all", "Cobertura da avaliação de SLA", "Todos os chamados do recorte, incluindo avaliados e não avaliados.")}>
+          {analytics.selection.matchedTickets > 0 ? <div className="coverage-donut">
+            <AnalyticalDonutChart data={coveragePie} value={`${formatMetricNumber(coveragePercent)}%`} caption="avaliado" height="72%" />
+            <p>{coveragePercent >= 80 ? <CheckCircleIcon size={14} weight="fill" /> : <WarningCircleIcon size={14} weight="fill" />}{coveragePercent >= 80 ? "Cobertura dentro do limiar de 80%" : "Abaixo do limiar recomendado de 80%"}</p>
+          </div> : <AnalyticalEmptyResult message="Nenhum chamado corresponde aos filtros aplicados." />}
         </WidgetFrame>
       </div>,
     ];
@@ -1076,6 +1168,22 @@ function normalizeApiDraft(payload: DashboardDraftApiResponse, dashboardKey: Das
   return parseDashboardDraft(serializeDashboardDraft(payload.draft), dashboardKey, dashboardLayouts[dashboardKey]);
 }
 
+function metricDetailsContext(dashboardKey: DashboardKey, metric: MetricDefinition): AnalyticalDetailsContext {
+  if (dashboardKey === "pending") {
+    if (metric.id === "metric-age") return { scope: "pending-valid-age", title: metric.title, description: "Pendências com abertura válida usadas no cálculo da idade mediana." };
+    if (metric.id === "metric-supplier") return { scope: "pending-supplier", title: metric.title, description: "Chamados pendentes cujo status indica encaminhamento ao fornecedor." };
+    if (metric.id === "metric-owner") return { scope: "pending-unassigned", title: metric.title, description: "Chamados pendentes sem responsável atribuído." };
+    return { scope: "pending", title: metric.title, description: "Chamados classificados na fila pendente atual." };
+  }
+  if (dashboardKey === "sla") {
+    if (metric.id === "metric-evaluated" || metric.id === "metric-coverage") {
+      return { scope: metric.id === "metric-evaluated" ? "sla-evaluated" : "all", title: metric.title, description: metric.id === "metric-evaluated" ? "Chamados classificados como dentro ou fora do prazo." : "Todos os chamados do recorte usados como denominador da cobertura." };
+    }
+    return { scope: "sla-first-response", title: metric.title, description: "Chamados com abertura e início válidos que sustentam a estatística de tempo." };
+  }
+  return { scope: "all", title: metric.title, description: "Chamados que pertencem ao recorte atual do painel." };
+}
+
 function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: DashboardKey; currentUser: CurrentUser; onBack: () => void }) {
   const theme = dashboardThemes.find((item) => item.key === dashboardKey) ?? dashboardThemes[0];
   const [editing, setEditing] = useState(false);
@@ -1083,7 +1191,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   const [builderOpen, setBuilderOpen] = useState(false);
   const [builderWidgetId, setBuilderWidgetId] = useState<string | null>(null);
   const [activePageId, setActivePageId] = useState("page-1");
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsContext, setDetailsContext] = useState<AnalyticalDetailsContext | null>(null);
   const [exporting, setExporting] = useState(false);
   const [crossFilter, setCrossFilter] = useState<string | null>(null);
   const [overviewCrossFilter, setOverviewCrossFilter] = useState<OverviewCrossFilter | null>(null);
@@ -1100,6 +1208,9 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   const [pendingState, setPendingState] = useState<PendingLoadState>(() => dashboardKey === "pending"
     ? { status: "loading", data: null, message: "Consultando a fila publicada." }
     : { status: "empty", data: null, message: "Modelo analítico não utilizado neste painel." });
+  const [slaState, setSlaState] = useState<SlaLoadState>(() => dashboardKey === "sla"
+    ? { status: "loading", data: null, message: "Consultando tempos e SLA publicados." }
+    : { status: "empty", data: null, message: "Modelo analítico não utilizado neste painel." });
   const { width, containerRef, mounted } = useContainerWidth();
   const boundedDashboardCompactor = useMemo(() => createBoundedDashboardCompactor(DASHBOARD_PAGE_MAX_ROWS), []);
   const interactionStartLayout = useRef<Layout | null>(null);
@@ -1110,6 +1221,10 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
   const builderWidget = builderWidgetId ? draftEditor.current.customWidgets.find((widget) => widget.id === builderWidgetId) ?? null : null;
   const hasUnsavedChanges = !dashboardDraftsEqual(draftEditor.current, draftEditor.saved);
   const persistenceBusy = draftPersistenceStatus === "loading" || draftPersistenceStatus === "saving";
+
+  function openDetails(scope: AnalyticalDetailScope = "all", title = "Chamados do recorte", description = `Filtros atuais de ${theme.title}`) {
+    setDetailsContext({ scope, title, description });
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1245,6 +1360,24 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     return () => controller.abort();
   }, [dashboardKey, filters, overviewCrossFilter]);
 
+  useEffect(() => {
+    if (dashboardKey !== "sla") return;
+    const controller = new AbortController();
+    void loadSlaAnalytics(filters, overviewCrossFilter, controller.signal)
+      .then((data) => setSlaState(data
+        ? { status: "ready", data, message: "Tempos e SLA publicados carregados." }
+        : { status: "empty", data: null, message: "Conclua uma sincronização para publicar os primeiros indicadores de SLA." }))
+      .catch((loadError) => {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setSlaState({
+          status: "error",
+          data: null,
+          message: loadError instanceof Error ? loadError.message : "Não foi possível carregar tempos e SLA.",
+        });
+      });
+    return () => controller.abort();
+  }, [dashboardKey, filters, overviewCrossFilter]);
+
   function setLayout(updater: Layout | ((current: Layout) => Layout)) {
     setDraftEditor((state) => {
       const page = state.current.pages.find((candidate) => candidate.id === activePageId) ?? state.current.pages[0];
@@ -1272,6 +1405,9 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     }
     if (dashboardKey === "pending") {
       setPendingState({ status: "loading", data: null, message });
+    }
+    if (dashboardKey === "sla") {
+      setSlaState({ status: "loading", data: null, message });
     }
   }
 
@@ -1356,7 +1492,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     setFiltersOpen(false);
     setBuilderOpen(false);
     setBuilderWidgetId(null);
-    setDetailsOpen(false);
+    setDetailsContext(null);
   }
 
   async function exportOverviewCsv() {
@@ -1485,14 +1621,16 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
     flash("Métrica removida do rascunho; salve para confirmar");
   }
 
-  const usesPublishedAnalytics = dashboardKey === "overview" || dashboardKey === "demand" || dashboardKey === "pending";
+  const usesPublishedAnalytics = dashboardKey === "overview" || dashboardKey === "demand" || dashboardKey === "pending" || dashboardKey === "sla";
   const metrics = dashboardKey === "overview"
     ? overviewMetrics(overviewState)
     : dashboardKey === "demand"
       ? demandMetrics(demandState)
       : dashboardKey === "pending"
         ? pendingMetrics(pendingState)
-        : themeMetrics[dashboardKey];
+        : dashboardKey === "sla"
+          ? slaMetrics(slaState)
+          : themeMetrics[dashboardKey];
   const allMetrics = usesPublishedAnalytics
     ? metrics
     : metrics.map((metric) => metric.id === "metric-total" && scale !== 1 ? { ...metric, value: String(Math.round(Number(metric.value) * scale)) } : metric);
@@ -1503,12 +1641,16 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
       ? demandState.data
       : dashboardKey === "pending" && pendingState.status === "ready"
         ? pendingState.data
-        : null;
+        : dashboardKey === "sla" && slaState.status === "ready"
+          ? slaState.data
+          : null;
   const analyticalMessage = dashboardKey === "overview"
     ? overviewState.message
     : dashboardKey === "demand"
       ? demandState.message
-      : pendingState.message;
+      : dashboardKey === "pending"
+        ? pendingState.message
+        : slaState.message;
   const analyticalPeriod = analyticalData?.selection.periodStart && analyticalData.selection.periodEnd
     ? `${formatAnalyticsDate(analyticalData.selection.periodStart)} — ${formatAnalyticsDate(analyticalData.selection.periodEnd)}`
     : "Período indisponível";
@@ -1552,7 +1694,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
           ) : (
             <button className="button button--ghost" disabled={persistenceBusy} onClick={() => setEditing(true)}><PencilSimpleIcon size={17} /> Editar layout</button>
           )}
-          <button className="button button--primary" disabled={persistenceBusy || usesPublishedAnalytics} title={usesPublishedAnalytics ? "Métricas personalizadas serão reativadas após o avaliador usar o snapshot real." : undefined} onClick={() => { setBuilderWidgetId(null); setBuilderOpen(true); }}><PlusIcon size={17} /> Indicador</button>
+          <button className="button button--primary" disabled={persistenceBusy} title={persistenceBusy ? "Aguarde o painel terminar de carregar." : "Criar uma métrica sobre o snapshot publicado"} onClick={() => { setBuilderWidgetId(null); setBuilderOpen(true); }}><PlusIcon size={17} /> Indicador</button>
         </div>
       </div>
 
@@ -1580,7 +1722,7 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
       )}
 
       <div className={cn("dashboard-grid-wrap", layout.length === 0 && "dashboard-grid-wrap--empty")} ref={containerRef}>
-        {layout.length === 0 && <div className="dashboard-page-empty"><SquaresFourIcon size={28} weight="duotone" /><strong>{activePage?.name} está vazia</strong><span>{usesPublishedAnalytics ? "Esta página está pronta para receber novos indicadores quando o construtor usar o snapshot real." : "Use “Indicador” para começar uma nova composição analítica."}</span></div>}
+        {layout.length === 0 && <div className="dashboard-page-empty"><SquaresFourIcon size={28} weight="duotone" /><strong>{activePage?.name} está vazia</strong><span>Use “Indicador” para começar uma nova composição analítica.</span></div>}
         {mounted && (
           <ReactGridLayout
             width={width}
@@ -1620,11 +1762,11 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
 
             {visibleMetrics.map((metric) => (
               <div key={metric.id}>
-                <MetricCard title={metric.title} value={metric.value} delta={metric.delta} tone={metric.tone} editing={editing} detailsEnabled={dashboardKey !== "pending"} onOpen={() => setDetailsOpen(true)} />
+                <MetricCard title={metric.title} value={metric.value} delta={metric.delta} tone={metric.tone} editing={editing} detailsEnabled={!usesPublishedAnalytics || analyticalData !== null} onOpen={() => setDetailsContext(metricDetailsContext(dashboardKey, metric))} />
               </div>
             ))}
 
-            {renderDashboardWidgets(dashboardKey, editing, setCrossFilter, applyOverviewCrossFilter, overviewState, demandState, pendingState, () => setDetailsOpen(true))
+            {renderDashboardWidgets(dashboardKey, editing, setCrossFilter, applyOverviewCrossFilter, overviewState, demandState, pendingState, slaState, openDetails)
               .filter((widget) => activeLayoutIds.has(String(widget.key)))}
 
             {customWidgets.map((widget) => (
@@ -1633,12 +1775,12 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
                   title={widget.title}
                   subtitle={`${widget.visualization} · métrica calculada`}
                   editing={editing}
+                  detailsEnabled={false}
                   action={editing ? (
                     <>
                       <button
                         aria-label={`Editar métrica ${widget.title}`}
-                        title={usesPublishedAnalytics ? "Edição suspensa até a métrica usar o snapshot real." : "Editar métrica"}
-                        disabled={usesPublishedAnalytics}
+                        title="Editar métrica"
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={(event) => { event.stopPropagation(); setBuilderWidgetId(widget.id); setBuilderOpen(true); }}
                       >
@@ -1656,20 +1798,12 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
                     </>
                   ) : undefined}
                 >
-                  {usesPublishedAnalytics ? (
-                    <div className="analytical-widget-state analytical-widget-state--empty">
-                      <ChartBarIcon size={24} weight="duotone" />
-                      <strong>Recálculo real pendente</strong>
-                      <span>{widget.formula}</span>
-                    </div>
-                  ) : (
-                    <div className="custom-widget-state">
-                      <ChartBarIcon size={30} weight="duotone" />
-                      <strong className="custom-widget-state__value">{widget.preview.formattedValue}</strong>
-                      <span>{widget.formula}</span>
-                      <small>N = {widget.preview.sampleSize} · cobertura {widget.preview.coverage.toLocaleString("pt-BR")}%</small>
-                    </div>
-                  )}
+                  <div className="custom-widget-state">
+                    <ChartBarIcon size={30} weight="duotone" />
+                    <strong className="custom-widget-state__value">{widget.preview.formattedValue}</strong>
+                    <span>{widget.formula}</span>
+                    <small>N = {widget.preview.sampleSize} · cobertura {widget.preview.coverage.toLocaleString("pt-BR")}%</small>
+                  </div>
                 </WidgetFrame>
               </div>
             ))}
@@ -1677,10 +1811,10 @@ function Dashboard({ dashboardKey, currentUser, onBack }: { dashboardKey: Dashbo
         )}
       </div>
 
-      {builderOpen && <IndicatorBuilder dashboardKey={dashboardKey} initialDefinition={builderWidget?.definition} onClose={closeBuilder} onSubmit={builderWidget ? updateWidget : addWidget} />}
-      {detailsOpen && (usesPublishedAnalytics
-        ? <OverviewDetailsDrawer filters={filters} crossFilter={overviewCrossFilter} panelName={theme.title} exportEnabled={dashboardKey === "overview"} onClose={() => setDetailsOpen(false)} />
-        : <DetailsDrawer crossFilter={crossFilter} onClose={() => setDetailsOpen(false)} />)}
+      {builderOpen && <IndicatorBuilder dashboardKey={dashboardKey} filters={filters} crossFilter={overviewCrossFilter} initialDefinition={builderWidget?.definition} onClose={closeBuilder} onSubmit={builderWidget ? updateWidget : addWidget} />}
+      {detailsContext && (usesPublishedAnalytics
+        ? <OverviewDetailsDrawer filters={filters} crossFilter={overviewCrossFilter} context={detailsContext} exportEnabled={dashboardKey === "overview" && detailsContext.scope === "all"} onClose={() => setDetailsContext(null)} />
+        : <DetailsDrawer crossFilter={crossFilter} onClose={() => setDetailsContext(null)} />)}
       {toast && <div className="toast"><CheckCircleIcon size={19} weight="fill" />{toast}</div>}
     </div>
   );
@@ -1734,12 +1868,14 @@ type PreviewState = {
 
 type IndicatorBuilderProps = {
   dashboardKey: DashboardKey;
+  filters: Filters;
+  crossFilter: OverviewCrossFilter | null;
   initialDefinition?: MetricDefinitionDraft;
   onClose: () => void;
   onSubmit: (definition: MetricDefinitionDraft, preview: MetricPreview) => void;
 };
 
-function IndicatorBuilder({ dashboardKey, initialDefinition, onClose, onSubmit }: IndicatorBuilderProps) {
+function IndicatorBuilder({ dashboardKey, filters, crossFilter, initialDefinition, onClose, onSubmit }: IndicatorBuilderProps) {
   const initialParts = initialDefinition ? decomposeMetricBuilderExpression(initialDefinition.expression) : null;
   const isEditingMetric = Boolean(initialDefinition);
   const unsupportedInitialDefinition = isEditingMetric && !initialParts;
@@ -1796,7 +1932,8 @@ function IndicatorBuilder({ dashboardKey, initialDefinition, onClose, onSubmit }
     const timeout = window.setTimeout(async () => {
       setPreviewState({ status: "validating", preview: null, errors: [], definitionKey });
       try {
-        const response = await fetch("/api/metrics/preview", {
+        const searchParams = createOverviewSearchParams(filters, crossFilter);
+        const response = await fetch(`/api/metrics/preview?${searchParams}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(definition),
@@ -1818,7 +1955,7 @@ function IndicatorBuilder({ dashboardKey, initialDefinition, onClose, onSubmit }
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [canValidate, definition, definitionKey]);
+  }, [canValidate, crossFilter, definition, definitionKey, filters]);
 
   function selectField(field: DataField) {
     if (activeSlot === "a") {
@@ -1912,7 +2049,7 @@ function formatDetailDateTime(value: string | null): string {
   }).format(parsed);
 }
 
-function OverviewDetailsDrawer({ filters, crossFilter, panelName, exportEnabled, onClose }: { filters: Filters; crossFilter: OverviewCrossFilter | null; panelName: string; exportEnabled: boolean; onClose: () => void }) {
+function OverviewDetailsDrawer({ filters, crossFilter, context, exportEnabled, onClose }: { filters: Filters; crossFilter: OverviewCrossFilter | null; context: AnalyticalDetailsContext; exportEnabled: boolean; onClose: () => void }) {
   const [page, setPage] = useState(1);
   const [reload, setReload] = useState(0);
   const [exporting, setExporting] = useState(false);
@@ -1925,7 +2062,7 @@ function OverviewDetailsDrawer({ filters, crossFilter, panelName, exportEnabled,
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadOverviewDetails(filters, crossFilter, page, controller.signal)
+    void loadOverviewDetails(filters, crossFilter, page, context.scope, controller.signal)
       .then((data) => setState(data
         ? { status: "ready", data, message: "Detalhamento carregado." }
         : { status: "empty", data: null, message: "Ainda não existe um snapshot publicado para detalhar." }))
@@ -1938,12 +2075,14 @@ function OverviewDetailsDrawer({ filters, crossFilter, panelName, exportEnabled,
         });
       });
     return () => controller.abort();
-  }, [crossFilter, filters, page, reload]);
+  }, [context.scope, crossFilter, filters, page, reload]);
 
   const data = state.status === "ready" ? state.data : null;
   const selectionLabel = crossFilter
-    ? `${overviewCrossFilterLabels[crossFilter.field]} cruzado: ${crossFilter.value}`
-    : `Filtros atuais de ${panelName}`;
+    ? `${context.description} · ${overviewCrossFilterLabels[crossFilter.field]} cruzado: ${crossFilter.value}`
+    : context.description;
+  const showStartedAt = context.scope === "sla-first-response";
+  const showSlaStatus = context.scope === "sla-evaluated";
 
   async function exportCsv() {
     if (!exportEnabled || exporting || state.status !== "ready") return;
@@ -1961,7 +2100,7 @@ function OverviewDetailsDrawer({ filters, crossFilter, panelName, exportEnabled,
   return (
     <div className="drawer-layer" onMouseDown={onClose}>
       <aside className="details-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label="Detalhamento dos chamados">
-        <header><div><p className="eyebrow">Detalhamento real</p><h2>Chamados do recorte</h2><span>{selectionLabel}</span></div><button aria-label="Fechar detalhamento" onClick={onClose}><XIcon size={18} /></button></header>
+        <header><div><p className="eyebrow">Detalhamento real</p><h2>{context.title}</h2><span>{selectionLabel}</span></div><button aria-label="Fechar detalhamento" onClick={onClose}><XIcon size={18} /></button></header>
         <div className="drawer-summary">
           <span><strong>{data ? data.selection.totalRecords.toLocaleString("pt-BR") : "—"}</strong><small>registros no recorte</small></span>
           <span><strong>{data ? `${data.selection.page}/${data.selection.pageCount}` : "—"}</strong><small>página atual</small></span>
@@ -1980,8 +2119,8 @@ function OverviewDetailsDrawer({ filters, crossFilter, panelName, exportEnabled,
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Chamado</th><th>Solicitante</th><th>Setor</th><th>Prioridade</th><th>Status</th><th>Abertura</th></tr></thead>
-              <tbody>{state.data.rows.map((row) => <tr key={row.rowKey}><td><strong>{row.code}</strong><small>{row.reason}</small></td><td>{row.requester}</td><td>{row.sector}</td><td><span className={cn("priority-tag", `priority-tag--${normalizedAnalyticalLabel(row.priority).replace(/\s+/g, "-")}`)}>{row.priority}</span></td><td>{row.status}</td><td>{formatDetailDateTime(row.openedAt)}</td></tr>)}</tbody>
+              <thead><tr><th>Chamado</th><th>Solicitante</th><th>Setor</th><th>Prioridade</th><th>Status</th><th>Abertura</th>{showStartedAt && <th>Início</th>}{showSlaStatus && <th>SLA</th>}</tr></thead>
+              <tbody>{state.data.rows.map((row) => <tr key={row.rowKey}><td><strong>{row.code}</strong><small>{row.reason}</small></td><td>{row.requester}</td><td>{row.sector}</td><td><span className={cn("priority-tag", `priority-tag--${normalizedAnalyticalLabel(row.priority).replace(/\s+/g, "-")}`)}>{row.priority}</span></td><td>{row.status}</td><td>{formatDetailDateTime(row.openedAt)}</td>{showStartedAt && <td>{formatDetailDateTime(row.startedAt)}</td>}{showSlaStatus && <td>{row.slaStatus}</td>}</tr>)}</tbody>
             </table>
           </div>
         )}

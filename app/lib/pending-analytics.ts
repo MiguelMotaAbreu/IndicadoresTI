@@ -1,6 +1,13 @@
 import type { NotionMappingFieldKey } from "./notion-mapping.ts";
-import { parseAnalyticalDate } from "./notion-opening-date.ts";
 import type { NormalizedNotionRecord } from "./notion-record-transformer.ts";
+import {
+  isPendingTicket,
+  isSupplierPendingTicket,
+  normalizeAnalyticalLabel,
+  ticketAgeHours,
+  ticketCategory,
+  validTicketField,
+} from "./analytical-ticket-rules.ts";
 import {
   selectOverviewTickets,
   type OverviewAnalyticsFilters,
@@ -73,61 +80,24 @@ export type PendingAnalytics = {
   };
 };
 
-const pendingStatusPatterns = ["nao iniciado", "aguardando info", "fornecedor"];
-
 function percentage(numerator: number, denominator: number): number {
   if (denominator <= 0) return 0;
   return Math.round((numerator / denominator) * 10_000) / 100;
 }
 
-function normalizeLabel(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase("pt-BR")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function validField(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKey) {
-  const field = record.fields[fieldKey];
-  return field?.state === "valid" ? field.value : null;
-}
-
-function categoryValues(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKey): string[] {
-  const value = validField(record, fieldKey);
-  if (value?.kind === "text") return value.value.trim() ? [value.value.trim()] : [];
-  if (value?.kind === "text_list") return [...new Set(value.value.map((item) => item.trim()).filter(Boolean))];
-  return [];
-}
-
 function firstCategory(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKey): string | null {
-  return categoryValues(record, fieldKey)[0] ?? null;
+  return ticketCategory(record, fieldKey);
 }
 
 function readText(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKey): string | null {
-  const value = validField(record, fieldKey);
+  const value = validTicketField(record, fieldKey);
   if (value?.kind === "text") return value.value.trim() || null;
   if (value?.kind === "number") return String(value.value);
   return null;
 }
 
-function isPendingStatus(value: string): boolean {
-  const normalized = normalizeLabel(value);
-  return pendingStatusPatterns.some((pattern) => normalized.includes(pattern));
-}
-
-function isSupplierStatus(value: string): boolean {
-  return normalizeLabel(value).includes("fornecedor");
-}
-
 function ageHours(record: NormalizedNotionRecord, publishedAt: Date): number | null {
-  const opening = validField(record, "ticket.openedAt");
-  if (opening?.kind !== "date") return null;
-  const parsed = parseAnalyticalDate(opening.value);
-  if (!parsed) return null;
-  const elapsed = publishedAt.getTime() - parsed.getTime();
-  return elapsed >= 0 ? Math.floor(elapsed / 3_600_000) : null;
+  return ticketAgeHours(record, publishedAt);
 }
 
 function median(values: readonly number[]): number | null {
@@ -157,7 +127,7 @@ function priorityRank(value: string): number {
     ["planejado", 5],
     ["nao definido", 6],
   ]);
-  return ranks.get(normalizeLabel(value)) ?? Number.MAX_SAFE_INTEGER;
+  return ranks.get(normalizeAnalyticalLabel(value)) ?? Number.MAX_SAFE_INTEGER;
 }
 
 function assignmentState(record: NormalizedNotionRecord): "assigned" | "unassigned" | "invalid" {
@@ -175,7 +145,7 @@ export function calculatePendingAnalytics(
   const selection = selectOverviewTickets(dataset, filters);
   const publishedAt = new Date(snapshot.publishedAt);
   const statusEvaluated = selection.tickets.filter((record) => firstCategory(record, "ticket.status") !== null);
-  const pending = statusEvaluated.filter((record) => isPendingStatus(firstCategory(record, "ticket.status") ?? ""));
+  const pending = statusEvaluated.filter(isPendingTicket);
   const ages = pending.map((record) => ageHours(record, publishedAt)).filter((value): value is number => value !== null);
   const bucketNames = ["Até 1 dia", "1–3 dias", "4–7 dias", "8–15 dias", "Mais de 15"];
   const ageBuckets = bucketNames.map((name) => ({ name, value: 0 }));
@@ -184,27 +154,27 @@ export function calculatePendingAnalytics(
   const assignments = pending.map(assignmentState);
   const evaluatedAssignments = assignments.filter((state) => state !== "invalid").length;
   const withoutAssignee = assignments.filter((state) => state === "unassigned").length;
-  const withSupplier = pending.filter((record) => isSupplierStatus(firstCategory(record, "ticket.status") ?? "")).length;
+  const withSupplier = pending.filter(isSupplierPendingTicket).length;
 
   const priorities = new Map<string, string>();
   for (const record of pending) {
     const priority = firstCategory(record, "ticket.priority");
-    if (priority) priorities.set(normalizeLabel(priority), priority);
+    if (priority) priorities.set(normalizeAnalyticalLabel(priority), priority);
   }
   const priorityLabels = [...priorities.values()].sort((left, right) => (
     priorityRank(left) - priorityRank(right) || left.localeCompare(right, "pt-BR")
   ));
   const prioritySeries = priorityLabels.map((label, index) => ({ key: `priority${index}`, label }));
-  const priorityKeys = new Map(prioritySeries.map((series) => [normalizeLabel(series.label), series.key]));
+  const priorityKeys = new Map(prioritySeries.map((series) => [normalizeAnalyticalLabel(series.label), series.key]));
   const sectors = new Map<string, { sector: string; total: number; values: Record<string, number> }>();
   let compositionCovered = 0;
   for (const record of pending) {
     const sector = firstCategory(record, "ticket.sector");
     const priority = firstCategory(record, "ticket.priority");
-    const priorityKey = priority ? priorityKeys.get(normalizeLabel(priority)) : null;
+    const priorityKey = priority ? priorityKeys.get(normalizeAnalyticalLabel(priority)) : null;
     if (!sector || !priorityKey) continue;
     compositionCovered += 1;
-    const sectorKey = normalizeLabel(sector);
+    const sectorKey = normalizeAnalyticalLabel(sector);
     const item = sectors.get(sectorKey) ?? { sector, total: 0, values: {} };
     item.total += 1;
     item.values[priorityKey] = (item.values[priorityKey] ?? 0) + 1;
@@ -214,7 +184,7 @@ export function calculatePendingAnalytics(
   const oldest = pending
     .flatMap((record) => {
       const hours = ageHours(record, publishedAt);
-      const opening = validField(record, "ticket.openedAt");
+      const opening = validTicketField(record, "ticket.openedAt");
       if (hours === null || opening?.kind !== "date") return [];
       return [{
         rowKey: record.pageId,

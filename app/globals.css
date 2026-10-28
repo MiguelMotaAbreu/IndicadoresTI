@@ -291,9 +291,9 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .ranked-list b { color: var(--amber); font-size: 9px; }
 
 .coverage-donut, .quality-score { position: relative; height: 100%; text-align: center; }
-.coverage-donut__center, .quality-score > div { position: absolute; top: 34%; left: 50%; display: grid; transform: translate(-50%, -50%); }
-.coverage-donut__center strong, .quality-score > div strong { font-size: 20px; letter-spacing: -0.8px; }
-.coverage-donut__center span, .quality-score > div span { color: var(--ink-faint); font-size: 7px; }
+.quality-score > div { position: absolute; top: 34%; left: 50%; display: grid; transform: translate(-50%, -50%); }
+.quality-score > div strong { font-size: 20px; letter-spacing: -0.8px; }
+.quality-score > div span { color: var(--ink-faint); font-size: 7px; }
 .coverage-donut p, .quality-score p { display: flex; align-items: center; justify-content: center; gap: 5px; margin: -2px 8px 0; color: var(--amber); font-size: 8px; line-height: 1.35; }
 .quality-score p { color: var(--green-700); }
 

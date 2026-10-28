@@ -36,6 +36,7 @@ export async function GET(request: Request) {
       session.user.role,
       query.page,
       query.pageSize,
+      query.scope,
     );
     return noStoreJson({ ok: true, data });
   } catch {

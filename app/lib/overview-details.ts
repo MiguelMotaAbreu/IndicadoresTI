@@ -8,6 +8,23 @@ import {
   selectOverviewTickets,
   type OverviewAnalyticsFilters,
 } from "./overview-analytics.ts";
+import {
+  isPendingTicket,
+  isSupplierPendingTicket,
+  isUnassignedPendingTicket,
+  ticketAgeHours,
+  ticketFirstResponseMinutes,
+  ticketSlaClassification,
+} from "./analytical-ticket-rules.ts";
+
+export type AnalyticalDetailScope =
+  | "all"
+  | "pending"
+  | "pending-valid-age"
+  | "pending-supplier"
+  | "pending-unassigned"
+  | "sla-evaluated"
+  | "sla-first-response";
 
 export type OverviewDetailRow = {
   rowKey: string;
@@ -18,6 +35,8 @@ export type OverviewDetailRow = {
   status: string;
   reason: string;
   openedAt: string | null;
+  startedAt: string | null;
+  slaStatus: string;
 };
 
 export type OverviewDetails = {
@@ -28,6 +47,7 @@ export type OverviewDetails = {
     pageSize: number;
     pageCount: number;
     filters: OverviewAnalyticsFilters;
+    scope: AnalyticalDetailScope;
   };
   privacy: { requesterMasked: boolean };
   rows: OverviewDetailRow[];
@@ -70,6 +90,21 @@ function openedAt(record: NormalizedNotionRecord): string | null {
   return value?.kind === "date" ? value.value : null;
 }
 
+function dateField(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKey): string | null {
+  const value = validValue(record, fieldKey);
+  return value?.kind === "date" ? value.value : null;
+}
+
+function matchesScope(record: NormalizedNotionRecord, scope: AnalyticalDetailScope, publishedAt: Date): boolean {
+  if (scope === "all") return true;
+  if (scope === "pending") return isPendingTicket(record);
+  if (scope === "pending-valid-age") return isPendingTicket(record) && ticketAgeHours(record, publishedAt) !== null;
+  if (scope === "pending-supplier") return isSupplierPendingTicket(record);
+  if (scope === "pending-unassigned") return isUnassignedPendingTicket(record);
+  if (scope === "sla-evaluated") return ticketSlaClassification(record) !== null;
+  return ticketFirstResponseMinutes(record) !== null;
+}
+
 function rowKey(snapshotId: string, pageId: string): string {
   return createHash("sha256").update(`${snapshotId}:${pageId}`).digest("hex").slice(0, 16);
 }
@@ -81,9 +116,11 @@ export function createOverviewDetails(
   role: UserRole,
   page: number,
   pageSize: number,
+  scope: AnalyticalDetailScope = "all",
 ): OverviewDetails {
   const selection = selectOverviewTickets(dataset, filters);
-  const sorted = [...selection.tickets].sort((left, right) => {
+  const publishedAt = new Date(snapshot.publishedAt);
+  const sorted = selection.tickets.filter((record) => matchesScope(record, scope, publishedAt)).sort((left, right) => {
     const dateDifference = (Date.parse(openedAt(right) ?? "") || 0) - (Date.parse(openedAt(left) ?? "") || 0);
     return dateDifference || left.pageId.localeCompare(right.pageId);
   });
@@ -99,6 +136,8 @@ export function createOverviewDetails(
     status: displayText(record, "ticket.status"),
     reason: displayText(record, "ticket.reason"),
     openedAt: openedAt(record),
+    startedAt: dateField(record, "ticket.startedAt"),
+    slaStatus: displayText(record, "ticket.slaStatus"),
   }));
 
   return {
@@ -109,6 +148,7 @@ export function createOverviewDetails(
       pageSize,
       pageCount,
       filters: selection.filters,
+      scope,
     },
     privacy: { requesterMasked: role === "analista" },
     rows,

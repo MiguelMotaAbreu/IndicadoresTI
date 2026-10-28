@@ -29,6 +29,8 @@ const dataset = {
       "ticket.requester": valid("text", "Maria da Silva"),
       "ticket.requesterEmail": valid("text", "maria@example.invalid"),
       "ticket.openedAt": valid("date", "2026-10-03T10:00:00-03:00"),
+      "ticket.startedAt": valid("date", "2026-10-03T10:30:00-03:00"),
+      "ticket.slaStatus": valid("text", "Dentro do prazo"),
       "ticket.sector": valid("text", "Recepção"),
       "ticket.priority": valid("text", "Alta"),
       "ticket.status": valid("text", "Concluído"),
@@ -47,6 +49,7 @@ const dataset = {
       "ticket.sector": valid("text", "Farmácia"),
       "ticket.priority": valid("text", "Média"),
       "ticket.status": valid("text", "Concluído"),
+      "ticket.slaStatus": valid("text", "Fora do prazo"),
       "ticket.reason": valid("text", "Computador"),
     }),
   ],
@@ -64,6 +67,7 @@ test("pagina o mesmo recorte analítico e ordena pela abertura mais recente", ()
     pageSize: 2,
     pageCount: 2,
     filters: allFilters,
+    scope: "all",
   });
   assert.deepEqual(firstPage.rows.map((row) => row.code), ["TKT-001", "Sem código"]);
   assert.equal(secondPage.rows.length, 1);
@@ -107,12 +111,27 @@ test("mascara solicitantes para Analista e preserva identificação permitida pa
   ]);
 });
 
+test("restringe o detalhamento à população que sustenta pendências e SLA", () => {
+  const pending = createOverviewDetails(snapshot, dataset, allFilters, "administrador", 1, 20, "pending");
+  const firstResponse = createOverviewDetails(snapshot, dataset, allFilters, "administrador", 1, 20, "sla-first-response");
+  const evaluated = createOverviewDetails(snapshot, dataset, allFilters, "administrador", 1, 20, "sla-evaluated");
+
+  assert.equal(pending.selection.totalRecords, 1);
+  assert.equal(pending.rows[0].requester, "João Souza");
+  assert.deepEqual(firstResponse.rows.map((row) => row.code), ["TKT-001"]);
+  assert.equal(firstResponse.rows[0].startedAt, "2026-10-03T10:30:00-03:00");
+  assert.deepEqual(evaluated.rows.map((row) => row.slaStatus), ["Dentro do prazo", "Fora do prazo"]);
+});
+
 test("valida filtros, repetição de parâmetros e limites de paginação", () => {
   assert.deepEqual(parseOverviewDetailsQuery(new URLSearchParams("period=last30&page=2&pageSize=50")), {
     filters: { period: "last30", sector: null, priority: null, status: null, reason: null },
     page: 2,
     pageSize: 50,
+    scope: "all",
   });
+  assert.equal(parseOverviewDetailsQuery(new URLSearchParams("scope=pending"))?.scope, "pending");
+  assert.equal(parseOverviewDetailsQuery(new URLSearchParams("scope=unknown")), null);
   assert.equal(parseOverviewDetailsQuery(new URLSearchParams("page=0")), null);
   assert.equal(parseOverviewDetailsQuery(new URLSearchParams("pageSize=51")), null);
   assert.equal(parseOverviewDetailsQuery(new URLSearchParams("page=1&page=2")), null);

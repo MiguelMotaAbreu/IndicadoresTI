@@ -90,33 +90,47 @@ async function assertDemandHeatmapLayout(page) {
 }
 
 async function assertDonutCenterFits(page) {
-  const measurements = await page.locator(".donut-center-label").evaluate((group) => {
+  const chartCount = await page.locator(".analytical-donut").count();
+  const labelLocator = page.locator(".analytical-donut .donut-center-label");
+  if (chartCount === 0 || await labelLocator.count() !== chartCount) {
+    throw new Error("Todo gráfico analítico de rosca deve usar o rótulo central proporcional compartilhado.");
+  }
+  const measurements = await labelLocator.evaluateAll((groups) => groups.map((group) => {
     const innerRadius = Number(group.getAttribute("data-inner-radius"));
     const centerX = Number(group.getAttribute("data-center-x"));
     const centerY = Number(group.getAttribute("data-center-y"));
     const value = group.querySelector(".donut-center-label__value");
     const caption = group.querySelector(".donut-center-label__caption");
     if (!(value instanceof SVGGraphicsElement) || !(caption instanceof SVGGraphicsElement)) return null;
-    const valueBox = value.getBBox();
-    const captionBox = caption.getBBox();
-    return { innerRadius, centerX, centerY, valueBox, captionBox, valueFontSize: Number(value.getAttribute("font-size")) };
-  });
-  if (!measurements) throw new Error("O centro proporcional da rosca não foi renderizado.");
-  const { innerRadius, centerX, centerY, valueBox, captionBox } = measurements;
-  const left = Math.min(valueBox.x, captionBox.x);
-  const right = Math.max(valueBox.x + valueBox.width, captionBox.x + captionBox.width);
-  const top = Math.min(valueBox.y, captionBox.y);
-  const bottom = Math.max(valueBox.y + valueBox.height, captionBox.y + captionBox.height);
-  if (
-    !Number.isFinite(innerRadius)
-    || left < centerX - innerRadius * 0.88
-    || right > centerX + innerRadius * 0.88
-    || top < centerY - innerRadius * 0.82
-    || bottom > centerY + innerRadius * 0.82
-  ) {
-    throw new Error("A porcentagem ou sua legenda ultrapassou a área interna da rosca.");
+    return {
+      innerRadius,
+      centerX,
+      centerY,
+      valueBox: value.getBBox(),
+      captionBox: caption.getBBox(),
+      valueFontSize: Number(value.getAttribute("font-size")),
+    };
+  }));
+  if (measurements.length === 0 || measurements.some((measurement) => measurement === null)) {
+    throw new Error("Todos os gráficos de rosca devem renderizar o centro proporcional compartilhado.");
   }
-  return measurements;
+  for (const measurement of measurements) {
+    const { innerRadius, centerX, centerY, valueBox, captionBox } = measurement;
+    const left = Math.min(valueBox.x, captionBox.x);
+    const right = Math.max(valueBox.x + valueBox.width, captionBox.x + captionBox.width);
+    const top = Math.min(valueBox.y, captionBox.y);
+    const bottom = Math.max(valueBox.y + valueBox.height, captionBox.y + captionBox.height);
+    if (
+      !Number.isFinite(innerRadius)
+      || left < centerX - innerRadius * 0.88
+      || right > centerX + innerRadius * 0.88
+      || top < centerY - innerRadius * 0.82
+      || bottom > centerY + innerRadius * 0.82
+    ) {
+      throw new Error("A porcentagem ou sua legenda ultrapassou a área interna de uma rosca.");
+    }
+  }
+  return measurements[0];
 }
 
 function rememberApplicationOutput(chunk) {
@@ -343,6 +357,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousDemand.status() !== 401) throw new Error("A análise de demanda aceitou uma consulta anônima.");
     const anonymousPending = await anonymousContext.request.get(`${baseUrl}/api/analytics/pending`);
     if (anonymousPending.status() !== 401) throw new Error("A análise de pendências aceitou uma consulta anônima.");
+    const anonymousSla = await anonymousContext.request.get(`${baseUrl}/api/analytics/sla`);
+    if (anonymousSla.status() !== 401) throw new Error("A análise de tempos e SLA aceitou uma consulta anônima.");
     const anonymousOverviewDetails = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/details`);
     if (anonymousOverviewDetails.status() !== 401) throw new Error("O detalhamento analítico aceitou uma consulta anônima.");
     const anonymousOverviewExport = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/export`);
@@ -396,6 +412,8 @@ async function runAuditFlow(baseUrl) {
     if (analystDemandBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a análise de demanda.");
     const analystPendingBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/pending`);
     if (analystPendingBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a análise de pendências.");
+    const analystSlaBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/sla`);
+    if (analystSlaBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou tempos e SLA.");
     const analystDetailsBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/details`);
     if (analystDetailsBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou o detalhamento analítico.");
     const analystExportBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/export`);
@@ -516,6 +534,12 @@ async function runAuditFlow(baseUrl) {
     if (pendingPayload.data !== null || pendingPayload.reason !== "no_snapshot") {
       throw new Error("A análise de pendências não representou corretamente a ausência de snapshot no banco descartável.");
     }
+    const slaResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/sla`);
+    if (!slaResponse.ok()) throw new Error("A conta autenticada não conseguiu consultar tempos e SLA.");
+    const slaPayload = await slaResponse.json();
+    if (slaPayload.data !== null || slaPayload.reason !== "no_snapshot") {
+      throw new Error("A análise de tempos e SLA não representou corretamente a ausência de snapshot no banco descartável.");
+    }
 
     await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
     await administratorPage.getByRole("heading", { name: "Visão geral" }).waitFor();
@@ -523,8 +547,9 @@ async function runAuditFlow(baseUrl) {
     if (!(await administratorPage.getByRole("button", { name: "Filtros" }).isDisabled())) {
       throw new Error("A Visão geral liberou filtros antes de conectá-los ao modelo analítico.");
     }
-    if (!(await administratorPage.getByRole("button", { name: "Indicador", exact: true }).isDisabled())) {
-      throw new Error("A Visão geral liberou métricas personalizadas ainda baseadas em demonstração.");
+    await administratorPage.getByText("Painel sincronizado", { exact: true }).waitFor();
+    if (await administratorPage.getByRole("button", { name: "Indicador", exact: true }).isDisabled()) {
+      throw new Error("A Visão geral manteve o construtor de indicadores bloqueado.");
     }
 
     await administratorPage.getByRole("button", { name: "Administração" }).click();
@@ -561,6 +586,7 @@ async function runAuditFlow(baseUrl) {
               pageId: "qa-ticket-one",
               fields: {
                 "ticket.openedAt": { state: "valid", value: { kind: "date", value: "2026-10-01T10:00:00-03:00" } },
+                "ticket.startedAt": { state: "valid", value: { kind: "date", value: "2026-10-01T10:15:00-03:00" } },
                 "ticket.externalCode": { state: "valid", value: { kind: "text", value: "TKT-001" } },
                 "ticket.requester": { state: "valid", value: { kind: "text", value: "Maria da Silva" } },
                 "ticket.requesterEmail": { state: "valid", value: { kind: "text", value: "maria.qa@example.invalid" } },
@@ -576,6 +602,7 @@ async function runAuditFlow(baseUrl) {
               pageId: "qa-ticket-two",
               fields: {
                 "ticket.openedAt": { state: "valid", value: { kind: "date", value: "2026-10-02T10:00:00-03:00" } },
+                "ticket.startedAt": { state: "valid", value: { kind: "date", value: "2026-10-02T11:00:00-03:00" } },
                 "ticket.externalCode": { state: "valid", value: { kind: "text", value: "TKT-002" } },
                 "ticket.requester": { state: "valid", value: { kind: "text", value: "João Souza" } },
                 "ticket.requesterEmail": { state: "valid", value: { kind: "text", value: "joao.qa@example.invalid" } },
@@ -670,6 +697,28 @@ async function runAuditFlow(baseUrl) {
       }
       const invalidPendingFilterResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/pending?period=invalid`);
       if (invalidPendingFilterResponse.status() !== 400) throw new Error("A análise de pendências aceitou um período analítico inválido.");
+
+      const publishedSlaResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/sla?period=all`);
+      if (!publishedSlaResponse.ok()) throw new Error("Tempos e SLA não conseguiram ler o snapshot descartável publicado.");
+      const publishedSla = await publishedSlaResponse.json();
+      if (
+        publishedSla.data?.selection?.matchedTickets !== 2
+        || publishedSla.data?.cards?.evaluated?.value !== 2
+        || publishedSla.data?.cards?.evaluated?.coveragePercent !== 100
+        || publishedSla.data?.cards?.evaluated?.compliancePercent !== 50
+        || publishedSla.data?.cards?.firstResponse?.validIntervals !== 2
+        || publishedSla.data?.cards?.firstResponse?.medianMinutes !== 37.5
+        || publishedSla.data?.cards?.firstResponse?.p90Minutes !== null
+      ) {
+        throw new Error("Tempos e SLA não calcularam corretamente o snapshot descartável publicado.");
+      }
+      const filteredSlaResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/sla?period=all&sector=${encodeURIComponent("Farmácia")}&priority=${encodeURIComponent("Média")}`);
+      const filteredSla = await filteredSlaResponse.json();
+      if (!filteredSlaResponse.ok() || filteredSla.data?.selection?.matchedTickets !== 1 || filteredSla.data?.cards?.firstResponse?.medianMinutes !== 60) {
+        throw new Error("Tempos e SLA não reutilizaram os filtros analíticos do snapshot.");
+      }
+      const invalidSlaFilterResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/sla?period=invalid`);
+      if (invalidSlaFilterResponse.status() !== 400) throw new Error("Tempos e SLA aceitaram um período analítico inválido.");
 
       const detailsResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/details?period=all&page=1&pageSize=1`);
       if (!detailsResponse.ok()) throw new Error("O Administrador não conseguiu consultar o detalhamento analítico.");
@@ -835,7 +884,7 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
       await metricCards.filter({ hasText: "Total de chamados" }).click();
       const detailsDrawer = administratorPage.getByLabel("Detalhamento dos chamados");
-      await detailsDrawer.getByRole("heading", { name: "Chamados do recorte" }).waitFor();
+      await detailsDrawer.getByRole("heading", { name: "Total de chamados" }).waitFor();
       await detailsDrawer.getByText("TKT-002", { exact: true }).waitFor();
       await detailsDrawer.getByText("João Souza", { exact: true }).waitFor();
       if (await detailsDrawer.getByText(/@example\.invalid/).count()) {
@@ -849,7 +898,7 @@ async function runAuditFlow(baseUrl) {
       await assertDonutCenterFits(administratorPage);
       await administratorPage.locator(".widget").filter({ hasText: "Distribuição por status" }).getByRole("button", { name: "Abrir detalhes" }).click();
       const filteredDrawer = administratorPage.getByLabel("Detalhamento dos chamados");
-      await filteredDrawer.getByText("Status cruzado: Concluído", { exact: true }).waitFor();
+      await filteredDrawer.getByText("Status cruzado: Concluído", { exact: false }).waitFor();
       await filteredDrawer.getByText("TKT-001", { exact: true }).waitFor();
       if (await filteredDrawer.getByText("TKT-002", { exact: true }).count()) {
         throw new Error("O drawer ignorou a seleção cruzada por status.");
@@ -888,12 +937,48 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByText("Pendências mais antigas", { exact: true }).waitFor();
       await administratorPage.getByText("Composição das pendências", { exact: true }).waitFor();
       await administratorPage.getByText("Fila: 1 · recorte: 2/2", { exact: false }).waitFor();
+      await pendingMetricCards.filter({ hasText: "Pendências atuais" }).click();
+      const pendingDetails = administratorPage.getByLabel("Detalhamento dos chamados");
+      await pendingDetails.getByRole("heading", { name: "Pendências atuais" }).waitFor();
+      await pendingDetails.getByText("TKT-002", { exact: true }).waitFor();
+      if (await pendingDetails.getByText("TKT-001", { exact: true }).count()) {
+        throw new Error("O detalhamento de pendências incluiu um chamado fora da fila atual.");
+      }
+      await pendingDetails.getByRole("button", { name: "Fechar", exact: true }).click();
       if (!(await administratorPage.getByRole("button", { name: "Exportar CSV", exact: true }).isDisabled())) {
         throw new Error("O painel Pendências liberou uma exportação ainda não conectada ao contrato próprio.");
       }
 
+      await administratorPage.getByRole("button", { name: "Tempos e SLA", exact: true }).click();
+      await administratorPage.getByRole("heading", { name: "Tempos e SLA" }).waitFor();
+      const slaMetricCards = administratorPage.locator(".metric-card");
+      await slaMetricCards.filter({ hasText: "Chamados avaliados" }).getByText("2", { exact: true }).waitFor();
+      await slaMetricCards.filter({ hasText: "Mediana até início" }).getByText("38 min", { exact: true }).waitFor();
+      await slaMetricCards.filter({ hasText: "P90 até início" }).getByText("—", { exact: true }).waitFor();
+      await slaMetricCards.filter({ hasText: "Cobertura do SLA" }).getByText("100%", { exact: true }).waitFor();
+      await administratorPage.getByText("Tempo até o primeiro atendimento", { exact: true }).waitFor();
+      await administratorPage.getByText("Cumprimento por prioridade", { exact: true }).waitFor();
+      await administratorPage.getByText("Tempos por prioridade", { exact: true }).waitFor();
+      await administratorPage.getByText("Cobertura da avaliação", { exact: true }).waitFor();
+      await assertDonutCenterFits(administratorPage);
+      await administratorPage.locator(".widget").filter({ hasText: "Tempo até o primeiro atendimento" }).getByRole("button", { name: "Abrir detalhes" }).click();
+      const slaDetails = administratorPage.getByLabel("Detalhamento dos chamados");
+      await slaDetails.getByRole("heading", { name: "Chamados com tempo de resposta válido" }).waitFor();
+      await slaDetails.getByRole("columnheader", { name: "Início" }).waitFor();
+      await slaDetails.getByText("TKT-001", { exact: true }).waitFor();
+      await slaDetails.getByText("TKT-002", { exact: true }).waitFor();
+      await slaDetails.getByRole("button", { name: "Fechar", exact: true }).click();
+      if (!(await administratorPage.getByRole("button", { name: "Exportar CSV", exact: true }).isDisabled())) {
+        throw new Error("O painel Tempos e SLA liberou uma exportação ainda não conectada ao contrato próprio.");
+      }
+
       await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
       await administratorPage.getByRole("heading", { name: "Visão geral" }).waitFor();
+
+      await administratorPage.getByRole("button", { name: "Indicador", exact: true }).click();
+      await administratorPage.getByRole("heading", { name: "Nova métrica calculada" }).waitFor();
+      await administratorPage.getByText("Fórmula válida e prévia confirmada", { exact: true }).waitFor();
+      await administratorPage.getByRole("button", { name: "Cancelar", exact: true }).click();
 
       await administratorPage.getByRole("button", { name: "Editar layout" }).click();
       const dragHandle = administratorPage.locator(".react-grid-item .widget-drag-handle").first();
@@ -917,18 +1002,23 @@ async function runAuditFlow(baseUrl) {
       if (!emptyPageBox || Math.abs(emptyPageBox.height - 523) > 2) {
         throw new Error("A página analítica não respeitou o limite vertical de 13 linhas.");
       }
+      await administratorPage.getByRole("button", { name: "Indicador", exact: true }).click();
+      await administratorPage.getByText("Fórmula válida e prévia confirmada", { exact: true }).waitFor();
+      await administratorPage.getByRole("button", { name: "Adicionar ao rascunho", exact: true }).click();
+      await administratorPage.getByText("Indicador adicionado ao rascunho", { exact: true }).waitFor();
+      await administratorPage.locator(".widget").filter({ hasText: "Índice de carga operacional" }).waitFor();
       await administratorPage.getByRole("button", { name: "Salvar layout" }).click();
       await administratorPage.getByText("Layout e métricas salvos no servidor", { exact: true }).waitFor();
       const pagedDraftResponse = await administratorContext.request.get(`${baseUrl}/api/dashboard-drafts/overview`);
       const pagedDraft = await pagedDraftResponse.json();
-      if (!pagedDraftResponse.ok() || pagedDraft.draft?.schemaVersion !== 2 || pagedDraft.draft?.pages?.length !== 2) {
-        throw new Error("A nova página não foi persistida no rascunho versão 2.");
+      if (!pagedDraftResponse.ok() || pagedDraft.draft?.schemaVersion !== 2 || pagedDraft.draft?.pages?.length !== 2 || pagedDraft.draft?.customWidgets?.length !== 1) {
+        throw new Error("A nova página ou sua métrica real não foi persistida no rascunho versão 2.");
       }
       await administratorPage.reload({ waitUntil: "networkidle" });
       await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
       await administratorPage.getByRole("heading", { name: "Visão geral" }).waitFor();
       await administratorPage.getByRole("tab", { name: "Página 2" }).click();
-      await administratorPage.getByText("Página 2 está vazia", { exact: true }).waitFor();
+      await administratorPage.locator(".widget").filter({ hasText: "Índice de carga operacional" }).waitFor();
       await administratorPage.getByRole("tab", { name: "Página 1" }).click();
       const boundedCanvas = await administratorPage.locator(".dashboard-grid-wrap").boundingBox();
       const boundedItems = await administratorPage.locator(".dashboard-grid-wrap .react-grid-item").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().bottom));
@@ -937,7 +1027,7 @@ async function runAuditFlow(baseUrl) {
       }
     }
 
-    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral, Demanda e Pendências reais, detalhamento protegido, exportação CSV, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral, Demanda, Pendências e Tempos/SLA reais, detalhamento protegido, exportação CSV, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await analystContext.close();
