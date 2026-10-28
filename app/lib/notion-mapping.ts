@@ -3,6 +3,7 @@ import type { NotionSourceKey, NotionSourceSchema } from "./notion-client";
 export type NotionMappingFieldKey =
   | "ticket.externalCode"
   | "ticket.openedAt"
+  | "ticket.openingTime"
   | "ticket.startedAt"
   | "ticket.completedAt"
   | "ticket.plannedAt"
@@ -35,7 +36,8 @@ export type NotionMappingField = {
 
 export const notionMappingFields: readonly NotionMappingField[] = [
   { key: "ticket.externalCode", source: "tickets", label: "Código visível do chamado", description: "Referência curta opcional; registros sem código continuam identificados pelo page.id do Notion.", required: false, acceptedTypes: ["unique_id", "rich_text", "title", "formula"], aliases: ["Chamados T.I UPA ZONA LESTE", "Chamado", "Código", "ID"] },
-  { key: "ticket.openedAt", source: "tickets", label: "Data e hora de abertura", description: "Base temporal da demanda; fórmulas serão validadas registro a registro na importação.", required: true, acceptedTypes: ["date", "created_time", "formula"], aliases: ["Data - Abertura", "Abertura", "Data de abertura"] },
+  { key: "ticket.openedAt", source: "tickets", label: "Data de abertura", description: "Data-base da demanda; será combinada com a hora de abertura quando vier sem horário.", required: true, acceptedTypes: ["date", "created_time", "formula"], aliases: ["Data - Abertura", "Abertura", "Data de abertura"] },
+  { key: "ticket.openingTime", source: "tickets", label: "Hora de abertura", description: "Texto no formato 08:30, 8h30 ou 08:30:00, combinado com a data no fuso de Santos.", required: false, acceptedTypes: ["rich_text", "title", "formula"], aliases: ["Hora - Abertura", "Hora da Abertura", "Hora de abertura"] },
   { key: "ticket.startedAt", source: "tickets", label: "Início do atendimento", description: "Permite calcular o tempo até o primeiro atendimento.", required: false, acceptedTypes: ["date", "formula"], aliases: ["Data - Em Atendimento", "Início do atendimento"] },
   { key: "ticket.completedAt", source: "tickets", label: "Conclusão", description: "Permite calcular conclusões e tempo total.", required: false, acceptedTypes: ["date", "formula"], aliases: ["Data - Concluído", "Conclusão", "Data de conclusão"] },
   { key: "ticket.plannedAt", source: "tickets", label: "Atendimento planejado", description: "Usado nos indicadores de agendamento e pontualidade.", required: false, acceptedTypes: ["date", "formula"], aliases: ["Data - Atendimento Planejado", "Atendimento planejado"] },

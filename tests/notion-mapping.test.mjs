@@ -16,6 +16,7 @@ const schemas = [
       { id: "ticket-title", name: "Solicitante", type: "title" },
       { id: "ticket-code", name: "Chamados T.I UPA ZONA LESTE", type: "rich_text" },
       { id: "ticket-opened", name: "Abertura", type: "date" },
+      { id: "ticket-opening-time", name: "Hora - Abertura", type: "rich_text" },
       { id: "ticket-reason", name: "Motivo", type: "select" },
       { id: "ticket-priority", name: "Prioridade", type: "select" },
       { id: "ticket-sector", name: "Setor", type: "relation" },
@@ -74,6 +75,21 @@ test("aceita solicitante como título e não exige código visível do chamado",
     propertyId: "ticket-title",
     propertyName: "Solicitante",
     propertyType: "title",
+  });
+});
+
+test("aceita a hora textual como complemento opcional da data de abertura", () => {
+  const mappings = validateNotionMapping({
+    ...requiredSelection,
+    "ticket.openingTime": "Hora - Abertura",
+  }, schemas);
+
+  assert.deepEqual(mappings.find((mapping) => mapping.fieldKey === "ticket.openingTime"), {
+    fieldKey: "ticket.openingTime",
+    source: "tickets",
+    propertyId: "ticket-opening-time",
+    propertyName: "Hora - Abertura",
+    propertyType: "rich_text",
   });
 });
 

@@ -1,5 +1,6 @@
 import type { AnalyticalSnapshot, SnapshotDataset } from "./sync-store.ts";
 import type { NotionMappingFieldKey } from "./notion-mapping.ts";
+import { parseAnalyticalDate } from "./notion-opening-date.ts";
 import type { NormalizedNotionRecord } from "./notion-record-transformer.ts";
 
 export type AnalyticsDistributionItem = { name: string; value: number };
@@ -106,8 +107,7 @@ function validField(record: NormalizedNotionRecord, fieldKey: NotionMappingField
 function readDate(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKey): Date | null {
   const value = validField(record, fieldKey);
   if (value?.kind !== "date") return null;
-  const parsed = new Date(value.value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parseAnalyticalDate(value.value);
 }
 
 function dateKey(value: Date): string {

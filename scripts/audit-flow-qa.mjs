@@ -288,6 +288,8 @@ async function runAuditFlow(baseUrl) {
     if (anonymousHealth.status() !== 401) throw new Error("A saúde do sistema aceitou uma consulta anônima.");
     const anonymousOverview = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview`);
     if (anonymousOverview.status() !== 401) throw new Error("A visão geral analítica aceitou uma consulta anônima.");
+    const anonymousDemand = await anonymousContext.request.get(`${baseUrl}/api/analytics/demand`);
+    if (anonymousDemand.status() !== 401) throw new Error("A análise de demanda aceitou uma consulta anônima.");
     const anonymousOverviewDetails = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/details`);
     if (anonymousOverviewDetails.status() !== 401) throw new Error("O detalhamento analítico aceitou uma consulta anônima.");
     const anonymousOverviewExport = await anonymousContext.request.get(`${baseUrl}/api/analytics/overview/export`);
@@ -337,6 +339,8 @@ async function runAuditFlow(baseUrl) {
     if (forbiddenHealth.status() !== 403) throw new Error("Uma conta Analista consultou a saúde do sistema.");
     const analystOverviewBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview`);
     if (analystOverviewBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a visão geral analítica.");
+    const analystDemandBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/demand`);
+    if (analystDemandBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou a análise de demanda.");
     const analystDetailsBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/details`);
     if (analystDetailsBeforePasswordChange.status() !== 403) throw new Error("Uma conta com senha temporária consultou o detalhamento analítico.");
     const analystExportBeforePasswordChange = await analystContext.request.get(`${baseUrl}/api/analytics/overview/export`);
@@ -444,6 +448,12 @@ async function runAuditFlow(baseUrl) {
     const overviewPayload = await overviewResponse.json();
     if (overviewPayload.data !== null || overviewPayload.reason !== "no_snapshot") {
       throw new Error("A visão geral não representou corretamente a ausência de snapshot no banco descartável.");
+    }
+    const demandResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/demand`);
+    if (!demandResponse.ok()) throw new Error("A conta autenticada não conseguiu consultar a análise de demanda.");
+    const demandPayload = await demandResponse.json();
+    if (demandPayload.data !== null || demandPayload.reason !== "no_snapshot") {
+      throw new Error("A análise de demanda não representou corretamente a ausência de snapshot no banco descartável.");
     }
 
     await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
@@ -556,6 +566,27 @@ async function runAuditFlow(baseUrl) {
       }
       const invalidFilterResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview?period=invalid`);
       if (invalidFilterResponse.status() !== 400) throw new Error("A visão geral aceitou um período analítico inválido.");
+
+      const publishedDemandResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/demand?period=all`);
+      if (!publishedDemandResponse.ok()) throw new Error("A análise de demanda não conseguiu ler o snapshot descartável publicado.");
+      const publishedDemand = await publishedDemandResponse.json();
+      if (
+        publishedDemand.data?.cards?.totalTickets !== 2
+        || publishedDemand.data?.cards?.averagePerCalendarDay?.value !== 1
+        || publishedDemand.data?.cards?.variation?.valuePercent !== null
+        || publishedDemand.data?.cards?.distinctReasons?.value !== 2
+        || publishedDemand.data?.heatmap?.validOpenings !== 2
+        || publishedDemand.data?.pareto?.totalOccurrences !== 2
+      ) {
+        throw new Error("A análise de demanda não calculou corretamente o snapshot descartável publicado.");
+      }
+      const filteredDemandResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/demand?period=all&sector=${encodeURIComponent("Farmácia")}&reason=${encodeURIComponent("Computador")}`);
+      const filteredDemand = await filteredDemandResponse.json();
+      if (!filteredDemandResponse.ok() || filteredDemand.data?.selection?.matchedTickets !== 1 || filteredDemand.data?.cards?.totalTickets !== 1) {
+        throw new Error("A análise de demanda não reutilizou os filtros analíticos do snapshot.");
+      }
+      const invalidDemandFilterResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/demand?period=invalid`);
+      if (invalidDemandFilterResponse.status() !== 400) throw new Error("A análise de demanda aceitou um período analítico inválido.");
 
       const detailsResponse = await administratorContext.request.get(`${baseUrl}/api/analytics/overview/details?period=all&page=1&pageSize=1`);
       if (!detailsResponse.ok()) throw new Error("O Administrador não conseguiu consultar o detalhamento analítico.");
@@ -744,6 +775,27 @@ async function runAuditFlow(baseUrl) {
       await metricCards.filter({ hasText: "Total de chamados" }).getByText("2", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
 
+      await administratorPage.getByRole("button", { name: "Demanda", exact: true }).click();
+      await administratorPage.getByRole("heading", { name: "Demanda e perfil" }).waitFor();
+      const demandMetricCards = administratorPage.locator(".metric-card");
+      await demandMetricCards.filter({ hasText: "Chamados no período" }).getByText("2", { exact: true }).waitFor();
+      await demandMetricCards.filter({ hasText: "Aberturas por dia" }).getByText("1", { exact: true }).waitFor();
+      await demandMetricCards.filter({ hasText: "Variação da demanda" }).getByText("—", { exact: true }).waitFor();
+      await demandMetricCards.filter({ hasText: "Motivos registrados" }).getByText("2", { exact: true }).waitFor();
+      await administratorPage.getByText("Evolução e sazonalidade", { exact: true }).waitFor();
+      await administratorPage.getByText("Demanda por dia e horário", { exact: true }).waitFor();
+      await administratorPage.getByText("Pareto dos motivos", { exact: true }).waitFor();
+      await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
+      if (await administratorPage.getByText("518", { exact: true }).count()) {
+        throw new Error("O painel Demanda ainda exibiu valores demonstrativos após carregar o snapshot real.");
+      }
+      if (!(await administratorPage.getByRole("button", { name: "Exportar CSV", exact: true }).isDisabled())) {
+        throw new Error("O painel Demanda liberou uma exportação ainda não conectada ao contrato próprio.");
+      }
+
+      await administratorPage.getByRole("button", { name: "Visão geral", exact: true }).click();
+      await administratorPage.getByRole("heading", { name: "Visão geral" }).waitFor();
+
       await administratorPage.getByRole("button", { name: "Editar layout" }).click();
       const dragHandle = administratorPage.locator(".react-grid-item .widget-drag-handle").first();
       const dragHandleBox = await dragHandle.boundingBox();
@@ -786,7 +838,7 @@ async function runAuditFlow(baseUrl) {
       }
     }
 
-    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral real, detalhamento protegido, exportação CSV, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
+    process.stdout.write("QA concluído: auditoria, autorização, páginas limitadas, Visão geral e Demanda reais, detalhamento protegido, exportação CSV, filtros, cruzamentos, mapeamentos e sincronização funcionam.\n");
   } finally {
     await anonymousContext.close();
     await analystContext.close();

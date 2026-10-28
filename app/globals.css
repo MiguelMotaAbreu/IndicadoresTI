@@ -268,7 +268,8 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .heatmap-axis span, .heatmap-row > span { color: var(--ink-faint); font-size: 7px; text-align: center; }
 .heatmap-row > span { text-align: left; font-weight: 650; }
 .heatmap-row button { height: 15px; border: 0; border-radius: 4px; color: white; cursor: pointer; font-size: 7px; font-weight: 700; }
-.heatmap-row button:hover { box-shadow: 0 0 0 2px rgba(23,111,76,0.18); }
+.heatmap-row button:not(:disabled):hover { box-shadow: 0 0 0 2px rgba(23,111,76,0.18); }
+.heatmap-row button:disabled { cursor: default; opacity: 1; }
 .heatmap-scale { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 4px; color: var(--ink-faint); font-size: 7px; }
 .heatmap-scale i { width: 13px; height: 6px; border-radius: 2px; background: rgba(23,111,76,0.18); }
 .heatmap-scale i:nth-of-type(2) { background: rgba(23,111,76,0.38); }

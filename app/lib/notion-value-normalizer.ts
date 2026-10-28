@@ -218,6 +218,7 @@ const categoryFields = new Set<NotionMappingFieldKey>([
 ]);
 
 const textFields = new Set<NotionMappingFieldKey>([
+  "ticket.openingTime",
   "ticket.priority",
   "ticket.slaStatus",
   "ticket.status",

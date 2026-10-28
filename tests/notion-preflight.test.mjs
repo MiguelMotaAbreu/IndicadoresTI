@@ -12,6 +12,7 @@ const schemas = [
     properties: [
       { id: "code", name: "Código", type: "rich_text" },
       { id: "opened", name: "Abertura", type: "date" },
+      { id: "opening-time", name: "Hora - Abertura", type: "rich_text" },
       { id: "requester", name: "Solicitante", type: "title" },
       { id: "reason", name: "Motivo", type: "select" },
       { id: "priority", name: "Prioridade", type: "select" },
@@ -50,6 +51,11 @@ const mappings = [
   { fieldKey: "history.occurredAt", source: "history", propertyId: "occurred", propertyName: "Data e hora", propertyType: "date", ...mappingMetadata },
 ];
 
+const mappingsWithOpeningTime = [
+  ...mappings,
+  { fieldKey: "ticket.openingTime", source: "tickets", propertyId: "opening-time", propertyName: "Hora - Abertura", propertyType: "rich_text", ...mappingMetadata },
+];
+
 function ticketPage(id, overrides = {}) {
   return {
     id,
@@ -83,13 +89,14 @@ function historyPage(id, ticketIds, overrides = {}) {
   };
 }
 
-function clientFor({ tickets = [], history = [], ticketRequests = 2, historyRequests = 1 } = {}) {
+function clientFor({ tickets = [], history = [], ticketRequests = 2, historyRequests = 1, expectedTicketPropertyIds = [] } = {}) {
   return {
     async loadSchema() { return schemas; },
     async queryDataSource(dataSourceId, propertyIds) {
       if (dataSourceId === "tickets-source") {
         assert.equal(propertyIds.includes("requester"), true);
         assert.equal(propertyIds.includes("ticket-relation"), false);
+        for (const propertyId of expectedTicketPropertyIds) assert.equal(propertyIds.includes(propertyId), true);
         return { pages: tickets, requestCount: ticketRequests };
       }
       assert.equal(dataSourceId, "history-source");
@@ -99,6 +106,40 @@ function clientFor({ tickets = [], history = [], ticketRequests = 2, historyRequ
     },
   };
 }
+
+test("consulta e valida Hora - Abertura quando o complemento está mapeado", async () => {
+  const result = await runNotionPreflight(clientFor({
+    tickets: [ticketPage("ticket-one", {
+      Abertura: { id: "opened", type: "date", date: { start: "2026-10-25" } },
+      "Hora - Abertura": { id: "opening-time", type: "rich_text", rich_text: [{ plain_text: "10:35" }] },
+    })],
+    history: [historyPage("event-one", ["ticket-one"])],
+    expectedTicketPropertyIds: ["opening-time"],
+  }), mappingsWithOpeningTime);
+
+  const openingDate = result.tickets.fields.find((field) => field.fieldKey === "ticket.openedAt");
+  const openingTime = result.tickets.fields.find((field) => field.fieldKey === "ticket.openingTime");
+  assert.equal(openingDate.validCount, 1);
+  assert.equal(openingTime.validCount, 1);
+  assert.equal(result.warningCount, 0);
+});
+
+test("uma hora de abertura textual inválida reduz cobertura e gera alerta sanitizado", async () => {
+  const result = await runNotionPreflight(clientFor({
+    tickets: [ticketPage("ticket-one", {
+      Abertura: { id: "opened", type: "date", date: { start: "2026-10-27" } },
+      "Hora - Abertura": { id: "opening-time", type: "rich_text", rich_text: [{ plain_text: "inválida" }] },
+    })],
+    history: [historyPage("event-one", ["ticket-one"])],
+    expectedTicketPropertyIds: ["opening-time"],
+  }), mappingsWithOpeningTime);
+
+  const openingTime = result.tickets.fields.find((field) => field.fieldKey === "ticket.openingTime");
+  assert.equal(openingTime.invalidCount, 1);
+  assert.equal(openingTime.coveragePercent, 0);
+  assert.equal(result.warningCount, 1);
+  assert.equal(JSON.stringify(result).includes("inválida"), false);
+});
 
 test("mantém chamado sem código elegível e mede os vínculos sem expor valores ou IDs", async () => {
   const result = await runNotionPreflight(

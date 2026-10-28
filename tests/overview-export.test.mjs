@@ -72,6 +72,16 @@ test("mantém solicitantes mascarados no CSV do perfil Analista", () => {
   assert.equal(exported.contents.includes("João Souza"), false);
 });
 
+test("exporta uma data sem horário sem deslocá-la para 21h do dia anterior", () => {
+  const dateOnlyTicket = ticket("date-only");
+  dateOnlyTicket.fields["ticket.openedAt"] = valid("date", "2026-10-27");
+  const exported = createOverviewCsvExport(snapshot, { tickets: [dateOnlyTicket] }, filters, "administrador");
+
+  assert.match(exported.contents, /"27\/10\/2026"/);
+  assert.equal(exported.contents.includes("26/10/2026"), false);
+  assert.equal(exported.contents.includes("21:00"), false);
+});
+
 test("recusa exportação acima do limite seguro de linhas", () => {
   const tickets = Array.from({ length: MAX_OVERVIEW_CSV_ROWS + 1 }, (_, index) => ({
     source: "tickets",

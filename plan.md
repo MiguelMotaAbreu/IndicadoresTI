@@ -29,8 +29,26 @@ Plataforma interna de análise dos indicadores de TI da UPA, sem qualquer funç�
 - Cross-filter simples ou múltiplo entre gráficos do painel atual.
 - Detalhamento dos chamados que compõem uma seleção.
 - Filtros mantidos somente durante a sessão.
-- Exportação de gráficos/painéis em imagem ou PDF e dados em CSV.
+- Exportação de gráficos/painéis em imagem ou PDF e dados em CSV. O PDF terá um modo executivo de seleção próprio, detalhado abaixo, e não será apenas uma captura integral da tela.
 - Período inicial definido individualmente por painel.
+
+### Exportação executiva em PDF — planejada, ainda não implementada
+
+- A interface terá um **Modo de exportação**, separado do Modo de edição. Ao ativá-lo, cada gráfico ou indicador elegível exibirá um controle de seleção, permitindo escolher exatamente quais blocos entrarão no relatório sem alterar o layout salvo.
+- A ordem inicial do PDF seguirá a leitura visual do painel, de cima para baixo e da esquerda para a direita. Antes de gerar, o usuário poderá revisar a seleção e reorganizar a ordem apenas no relatório.
+- O PDF terá capa e contexto mínimo: título do painel, páginas de origem, autor da exportação, data e hora da geração, data da última sincronização, filtros e seleções cruzadas aplicados, versão do snapshot e aviso de confidencialidade.
+- Cada bloco selecionado será exportado com título, gráfico/cartão, fórmula ou regra do indicador quando aplicável, cobertura, tamanho da amostra e alertas de qualidade. O relatório não deve transformar ausência de amostra em zero nem esconder limitações do histórico.
+- Abaixo de cada gráfico poderão aparecer até cinco chamados que sustentam aquele recorte. A amostragem será determinística e explicada no relatório — por padrão, os cinco registros mais recentes pela data própria do indicador — para que o mesmo snapshot e os mesmos filtros produzam o mesmo exemplar.
+- Os exemplos mostrarão somente os campos necessários para rastreabilidade executiva, como código visível, setor, motivo, prioridade, status e data relacionada. IDs internos do Notion e emails nunca serão incluídos.
+- Existe intenção de incluir um trecho curto da descrição operacional do chamado, mas esse campo ficará **desabilitado por padrão e bloqueado tecnicamente** até existir uma política aprovada para texto livre sensível. A liberação exigirá definição de finalidade, perfis autorizados, tamanho máximo, mascaramento, retenção e destinatários externos.
+- O relatório será gerado sobre o snapshot publicado e não poderá misturar gráficos de uma carga com exemplos lidos ao vivo de outra versão do Notion.
+- A solicitação de geração conterá um manifesto com painel, página, IDs dos blocos selecionados, ordem, filtros e snapshot. O servidor repetirá autorização, filtros, regras de privacidade e consultas; a seleção feita no navegador não será tratada como fonte confiável dos dados.
+- Geração, sucesso, falha e eventual inclusão autorizada de descrições serão auditados sem copiar o conteúdo dos chamados para o log.
+- CSV permanece como exportação tabular do recorte. PDF será o artefato executivo com visualizações e evidências; imagem continuará sendo a opção rápida para um gráfico ou página sem exemplares operacionais.
+
+**Momento recomendado de implementação:** depois que os painéis temáticos e seus gráficos estiverem conectados ao snapshot real e seus contratos de dados estiverem estáveis, mas antes do endurecimento final de produção, empacotamento e aceite. Implementar agora obrigaria a refazer seleção, proveniência e renderização à medida que os painéis demonstrativos forem substituídos.
+
+**Sequência recomendada:** (1) concluir os modelos analíticos reais dos painéis; (2) aprovar a governança da descrição; (3) criar o manifesto e o Modo de exportação com prévia; (4) gerar o documento no servidor com os exemplares determinísticos; (5) validar paginação, fontes, gráficos, privacidade, auditoria e desempenho em Chrome/Edge e no container de produção.
 
 ## Composição inicial dos painéis
 
@@ -58,6 +76,11 @@ O usuário pode reorganizar essa composição, restaurar o arranjo inicial do pa
 - O painel Visão geral consome exclusivamente essa leitura real e apresenta estados explícitos de carregamento, vazio e falha; controles ainda não conectados ao snapshot permanecem bloqueados para não misturar resultados reais e demonstrativos.
 - Os filtros de período de abertura, setor, prioridade e status da Visão geral são executados no servidor sobre o snapshot publicado; suas opções vêm da própria base e os períodos relativos são ancorados na abertura válida mais recente para manter o resultado reproduzível.
 - Status, prioridade e motivo na Visão geral permitem uma seleção cruzada simples por vez; o clique recalcula todos os indicadores no servidor e mantém um chip removível que explicita a dimensão e o valor ativos.
+- O painel Demanda usa uma leitura temática própria, calculada no servidor sobre o mesmo snapshot e contrato de filtros da Visão geral. Total, média por dia corrido, variação entre períodos equivalentes, motivos, série temporal, mapa de calor e Pareto nunca podem recorrer silenciosamente a números demonstrativos.
+- A variação da demanda só é exibida para períodos relativos de 30 ou 90 dias, comparados com a janela imediatamente anterior de igual duração; no período completo ou sem base anterior, o valor permanece nulo e a limitação deve ser explicada.
+- O cruzamento por motivo recalcula todo o painel Demanda no servidor. Dia da semana e faixa horária permanecem informativos até integrarem explicitamente o contrato de filtros, evitando controles visuais que aparentem alterar dados sem sustentação no backend.
+- A abertura é composta por `Data - Abertura` e, quando mapeada, `Hora - Abertura`. A hora textual deve ser validada e combinada no fuso `America/Sao_Paulo` antes da publicação do snapshot; valores inválidos reduzem cobertura e geram alerta sem persistir o texto bruto.
+- Uma data de abertura sem hora permanece elegível para séries diárias e mensais no próprio dia civil, mas não pode ser usada em mapas de calor ou outros indicadores horários. A interface deve exibir somente a data, sem fabricar `00:00`, `12:00` ou aplicar o deslocamento UTC de 21h do dia anterior.
 - Em caso de falha, permanece visível a última carga íntegra.
 - Registros removidos do Notion são preservados localmente como inativos e excluídos dos indicadores por padrão.
 - Correções de dados são feitas somente no Notion.
@@ -66,7 +89,7 @@ O usuário pode reorganizar essa composição, restaurar o arranjo inicial do pa
 - O título da base pode representar o solicitante. Solicitante, código visível e identidade técnica são conceitos independentes.
 - Chamado de teste e futuras exclusões são controlados pelo `page.id`, com motivo e auditoria.
 - Categorias derivadas dos motivos usam mapa administrável.
-- O motivo do chamado é a classificação analítica. A descrição não é usada para identificar nem categorizar registros no v1, pois não será sincronizada por conter texto livre potencialmente sensível.
+- O motivo do chamado é a classificação analítica. A descrição não é usada para identificar nem categorizar registros no v1 e não integra o snapshot analítico atual, pois contém texto livre potencialmente sensível. Uma futura exceção exclusiva para evidência em PDF depende da governança descrita no Modo de exportação executiva.
 - SLA utiliza a classificação produzida pelo Notion.
 - Demanda diária considera dias corridos, inclusive dias com zero chamados.
 - Tempos exibem duração corrida e minutos de expediente quando disponíveis.
@@ -105,7 +128,7 @@ Os anexos contêm 518 chamados entre 7 de julho e 20 de outubro de 2026 e 72 mov
 - Sessões expiram após 30 minutos de inatividade ou oito horas totais.
 - Contas são desativadas, não apagadas.
 - Painéis de usuários desativados podem ser reatribuídos pelo administrador.
-- Descrições e anexos não são sincronizados.
+- Descrições e anexos não são sincronizados no modelo analítico atual. Anexos permanecem definitivamente fora do escopo; eventual trecho de descrição para PDF exige aprovação de privacidade e implementação dedicada, sem liberar o campo para análises gerais.
 - Analistas veem solicitantes e emails mascarados.
 - Somente administradores podem revelar identificação individual, mediante ação auditada.
 - CSVs contêm agregados e registros mascarados.
@@ -133,6 +156,9 @@ Os anexos contêm 518 chamados entre 7 de julho e 20 de outubro de 2026 e 72 mov
 - Arrastar, soltar e redimensionar deve responder sem atraso perceptível e preservar o layout somente após salvar.
 - O construtor deve impedir a inclusão enquanto houver erro de tipo, divisão inválida ou incompatibilidade de visualização.
 - Exportações em até quinze segundos.
+- O Modo de exportação deve selecionar blocos sem alterar o painel salvo; cancelar a seleção não deixa rascunho nem modifica o layout.
+- O PDF executivo deve conter somente os blocos escolhidos, repetir filtros e snapshot, limitar cada evidência a cinco chamados, manter gráficos legíveis e não cortar cartões, tabelas ou legendas entre páginas.
+- O mesmo manifesto, snapshot e filtros devem produzir a mesma ordem de evidências; diferenças permitidas se restringem à data da geração e ao autor da exportação.
 - Validação manual contra uma planilha de referência produzida com uma cópia integral anonimizada.
 - Aceite funcional final realizado pelo responsável pelo projeto.
 
@@ -161,7 +187,9 @@ Os anexos contêm 518 chamados entre 7 de julho e 20 de outubro de 2026 e 72 mov
 - Acesso, token e IDs reais das bases do Notion ainda serão fornecidos.
 - Alterações futuras no esquema ou na API do Notion podem interromper sincronizações.
 - O processo técnico de anonimização da cópia integral ainda precisa ser definido e validado.
+- Descrições de chamados podem conter nomes de pacientes, profissionais, credenciais, informações clínicas ou outros dados pessoais. Nenhuma inclusão em PDF deve ser liberada antes de definir mascaramento, base de acesso, retenção e responsabilidade pelo compartilhamento externo.
+- Cinco exemplos ajudam a explicar a origem operacional, mas não formam uma amostra estatisticamente representativa. O PDF deverá identificá-los como “exemplos do recorte” e declarar o critério de seleção para evitar generalizações indevidas.
 - A amostra do histórico é muito pequena para vários indicadores e possui somente 29 etapas encerradas.
 - A atualização exclusivamente manual pode deixar painéis desatualizados.
 - Referências visuais e identidade final ainda estão pendentes.
-- Relatórios executivos externos são apenas uma preocupação de evolução futura; requisitos de distribuição, proteção e destinatários ainda não foram definidos.
+- Relatórios executivos externos agora fazem parte do escopo planejado de exportação, porém requisitos de distribuição, proteção do arquivo, classificação de confidencialidade e destinatários autorizados ainda não foram definidos e bloqueiam a inclusão de descrições.

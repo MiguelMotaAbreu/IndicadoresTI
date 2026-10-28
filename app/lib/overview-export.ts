@@ -1,4 +1,5 @@
 import type { SnapshotDataset, AnalyticalSnapshot } from "./sync-store.ts";
+import { isDateOnly } from "./notion-opening-date.ts";
 import type { OverviewAnalyticsFilters } from "./overview-analytics.ts";
 import { createOverviewDetails } from "./overview-details.ts";
 import type { UserRole } from "./user-store.ts";
@@ -30,6 +31,10 @@ function spreadsheetSafeCell(value: string): string {
 
 function formatDateTime(value: string | null): string {
   if (!value) return "Não informada";
+  if (isDateOnly(value)) {
+    const [year, month, day] = value.split("-");
+    return `${day}/${month}/${year}`;
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Não informada";
   return new Intl.DateTimeFormat("pt-BR", {

@@ -1,4 +1,5 @@
 import type { NotionMappingFieldKey } from "./notion-mapping.ts";
+import { isDateOnly } from "./notion-opening-date.ts";
 import type { NormalizedNotionRecord } from "./notion-record-transformer.ts";
 import type { NormalizedNotionValue } from "./notion-value-normalizer.ts";
 
@@ -31,7 +32,7 @@ function valueFor(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKe
 
 function dateTimeFor(record: NormalizedNotionRecord, fieldKey: NotionMappingFieldKey): number | null {
   const value = valueFor(record, fieldKey);
-  if (value?.kind !== "date") return null;
+  if (value?.kind !== "date" || isDateOnly(value.value)) return null;
   const timestamp = Date.parse(value.value);
   return Number.isNaN(timestamp) ? null : timestamp;
 }
