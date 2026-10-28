@@ -190,7 +190,7 @@ kbd { border: 1px solid var(--line-strong); border-radius: 5px; background: whit
 .edit-notice span { flex: 1; }
 .edit-notice button { border: 0; background: transparent; color: var(--green-800); cursor: pointer; font-weight: 700; }
 
-.dashboard-grid-wrap { position: relative; height: 523px; max-height: 523px; margin-top: 1px; overflow: hidden; }
+.dashboard-grid-wrap { position: relative; height: 523px; max-height: 523px; margin-top: 1px; overflow: hidden; padding-inline: 2px; }
 .dashboard-grid-wrap--empty { border: 1px dashed #c7d8cf; border-radius: 14px; background: linear-gradient(135deg, rgba(239,247,243,0.72), rgba(255,255,255,0.9)); }
 .dashboard-page-empty { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--green-700); text-align: center; pointer-events: none; }
 .dashboard-page-empty strong { color: var(--ink); font-size: 12px; }

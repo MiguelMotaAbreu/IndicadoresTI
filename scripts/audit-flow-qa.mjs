@@ -38,6 +38,23 @@ function rectanglesOverlap(left, right) {
     && left.y + left.height > right.y;
 }
 
+async function assertDashboardHorizontalInsets(page) {
+  const canvas = await page.locator(".dashboard-grid-wrap").boundingBox();
+  const items = await page.locator(".dashboard-grid-wrap .react-grid-item").evaluateAll((elements) => elements.map((element) => {
+    const bounds = element.getBoundingClientRect();
+    return { left: bounds.left, right: bounds.right };
+  }));
+  if (!canvas || items.length === 0) throw new Error("O canvas não apresentou blocos para validar suas margens laterais.");
+  const leftInset = Math.min(...items.map((item) => item.left)) - canvas.x;
+  const rightInset = canvas.x + canvas.width - Math.max(...items.map((item) => item.right));
+  if (leftInset < 1 || rightInset < 1) {
+    throw new Error("Um bloco encostou na área de recorte lateral do canvas.");
+  }
+  if (Math.abs(leftInset - rightInset) > 1) {
+    throw new Error(`As margens laterais do canvas ficaram assimétricas (${leftInset.toFixed(2)}px / ${rightInset.toFixed(2)}px).`);
+  }
+}
+
 async function assertDemandHeatmapLayout(page) {
   const widget = page.locator(".widget").filter({ hasText: "Demanda por dia e horário" }).first();
   const measurements = await widget.evaluate((element) => {
@@ -755,6 +772,7 @@ async function runAuditFlow(baseUrl) {
       await administratorPage.getByText("Evolução da demanda", { exact: true }).waitFor();
       await administratorPage.getByText("Distribuição por status", { exact: true }).waitFor();
       await administratorPage.getByText("Recorte: 2/2", { exact: false }).waitFor();
+      await assertDashboardHorizontalInsets(administratorPage);
       const downloadPromise = administratorPage.waitForEvent("download");
       await administratorPage.getByRole("button", { name: "Exportar CSV", exact: true }).click();
       const downloadedCsv = await downloadPromise;
